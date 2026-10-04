@@ -180,12 +180,15 @@ export function Modal({
   onClose,
   children,
   width = "w-[460px]",
+  align = "center",
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   /** A Tailwind width class. */
   width?: string;
+  /** "top" for a dialog whose height changes while open: it then grows downward only. */
+  align?: "center" | "top";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Close on a click that both starts and ends on the backdrop: a text selection dragged out of
@@ -218,7 +221,9 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40"
+      className={`fixed inset-0 z-[70] flex justify-center bg-black/40 ${
+        align === "top" ? "items-start pt-[5vh]" : "items-center"
+      }`}
       onMouseDown={(e) => {
         pressedBackdrop.current = e.target === e.currentTarget;
       }}

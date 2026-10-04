@@ -38,19 +38,22 @@ uv run comfylens serve DIR              # web UI at http://localhost:8765/
 uv run comfylens index DIR              # incremental; --full re-reads, --reextract re-extracts
 uv run comfylens report DIR             # add --json, or --family qwen-image-2.1
 uv run comfylens inspect IMAGE.png      # one file, no catalog; add --json
+uv run comfylens collection export DIR  # back up the prompt collection; or a FILE.zip, --force
+uv run comfylens collection import FILE.zip
 ```
 
 - **`serve`:** starts the web UI on 127.0.0.1. It serves the existing catalog at once, indexes in the background and opens a browser. Use `--no-index`, `--no-open`, `--port` and `--host` to change that. A non-loopback `--host` prints a warning, because there is no authentication and the UI can rename and trash files. With `--watch`, new images are indexed as ComfyUI writes them; `make` turns this on by default.
 - **`index`:** scans the library and reads new or changed files once in a process pool. It writes the catalog and WebP thumbnails, and flags bulk-copied timestamps. It never writes inside the library.
 - **`report`:** shows the parse success rate, families, reachable node classes with no handler, warnings and suspect timestamp clusters. It also prints per-family statistics, LoRAs and top configurations, plus index timing.
 - **`inspect`:** shows everything extraction finds in one file.
+- **`collection export` / `collection import`:** the same as Export and Import in the Collection view. Export writes `comfylens-collection-YYYY-MM-DD.zip` into a directory, or to the file you name; it never replaces a file without `--force`, and the zip appears only once complete, so it suits a scheduled backup. Import skips prompts already in the collection.
 
 In the UI:
 
 - **Rename and trash:** right-click an image in the grid or in the detail view. Rename changes the file name within its folder, keeping the extension, and never overwrites another file. Move to trash sends the files to the system trash (on Linux `~/.local/share/Trash`, or `.Trash-<uid>` at the root of another drive), where your file manager can restore them. Right-click a selected image to trash the whole selection; images hidden by filters are left alone. The grid updates at once, and the catalog is updated with the file, so no re-index is needed. These are the only actions that change files in the library.
 - **Compare:** select exactly two images and click Compare to see their settings, LoRA chains and a word-level prompt diff side by side.
 - **Distinctive terms:** with a selection, the Prompts tab shows the words and phrases that set the selection apart from the rest of the filtered images.
-- **Prompt collection:** switch to Collection in the top bar to keep prompts worth trying, each with reference images, tags, notes and a source link. Drop, pick or paste images there (PNG, JPEG or WebP; ComfyUI metadata fills in the prompt and settings), or right-click a library image and choose Save to collection. Add to saved prompt links library images to a saved prompt as attempts. Saved images carry a bookmark badge, the Collection filter in the sidebar shows saved or unsaved images, and Show in library lists a saved prompt's images: those linked to it and those whose prompt has the same text. Images are copied into the collection, so a saved prompt keeps its references when library files are renamed or trashed. The collection is shared by every library.
+- **Prompt collection:** switch to Collection in the top bar to keep prompts worth trying, each with reference images, tags, notes and a source link. Drop, pick or paste images there or into the prompt editor (PNG, JPEG or WebP; ComfyUI or A1111 metadata fills in the prompt and settings), or right-click a library image and choose Save to collection. Add to saved prompt links library images to a saved prompt as attempts. In the Prompts tab, the bookmark button beside a distinct positive prompt saves it as a new prompt. Saved images carry a bookmark badge, the Collection filter in the sidebar shows saved or unsaved images, and Show in library lists a saved prompt's images: those linked to it and those whose prompt has the same text. Images are copied into the collection, so a saved prompt keeps its references when library files are renamed or trashed. The collection is shared by every library. Export downloads it as one zip of prompts and images, for a backup or another machine; Import adds an exported zip's prompts, skipping those already there.
 - **Families:** images are grouped by model family using the `[[families]]` rules in the config. The defaults cover Qwen Image, Krea 2 (local `krea-2` and hosted `krea-2-api`), FLUX and Ideogram.
 
 State lives outside the library:
@@ -62,7 +65,7 @@ State lives outside the library:
 | Prompt collection | `$XDG_DATA_HOME/comfylens/collection/` |
 | Config | `$XDG_CONFIG_HOME/comfylens/config.toml` |
 
-Deleting the catalog or the thumbnail directory is always safe; the next `index` rebuilds it. The prompt collection is different: it holds your saved prompts and copies of their images, and nothing can rebuild it.
+Deleting the catalog or the thumbnail directory is always safe; the next `index` rebuilds it. The prompt collection is different: it holds your saved prompts and copies of their images, and nothing can rebuild it, so back it up with Export in the Collection view or `comfylens collection export`.
 
 ## Configuration
 

@@ -127,6 +127,18 @@ export async function saveImageToCollection(id: number): Promise<void> {
   }
 }
 
+/** Open the editor on a prompt's text, e.g. a distinct prompt from prompt analysis. */
+export async function saveTextToCollection(positive: string): Promise<void> {
+  try {
+    const draft = await api.draftFromText({ positive, negative: "" });
+    useCollection.getState().openEditor({ mode: "new", draft, references: [] });
+  } catch (e) {
+    useFileActions
+      .getState()
+      .notify({ text: `Could not start a saved prompt: ${errorText(e)}`, tone: "error" });
+  }
+}
+
 /** Open the editor on drafts of dropped, picked or pasted files, uploaded one at a time. */
 export async function draftFiles(files: File[]): Promise<void> {
   const { notify } = useFileActions.getState();

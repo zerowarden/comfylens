@@ -86,8 +86,8 @@ def _member(original: ArchiveOriginal | dict[str, Any]) -> str:
     return f"originals/{o['content_hash']}.{EXTENSIONS[o['format']]}"
 
 
-def export_zip(store: CollectionStore, out: IO[bytes]) -> int:
-    """Write the collection to `out`; returns the number of prompts written.
+def export_zip(store: CollectionStore, out: IO[bytes]) -> tuple[int, int]:
+    """Write the collection to `out`; returns how many prompts and images it holds.
 
     An original whose file has gone missing is left out; its prompts keep their other images.
     """
@@ -107,7 +107,7 @@ def export_zip(store: CollectionStore, out: IO[bytes]) -> int:
             if found is not None:
                 # Images are compressed already: stored, not deflated.
                 z.write(found["path"], _member(o), zipfile.ZIP_STORED)
-    return len(prompts)
+    return len(prompts), len(present)
 
 
 def _read(z: zipfile.ZipFile, name: str, limit: int) -> bytes:

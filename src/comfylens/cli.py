@@ -1,11 +1,14 @@
 import contextlib
 import ipaddress
 import json
+import os
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
 from dataclasses import asdict
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -15,6 +18,8 @@ from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeRemainingColumn
 from rich.table import Column, Table
 
+from comfylens.collection.archive import InvalidArchive, export_zip, import_zip
+from comfylens.collection.store import CollectionStore, CollectionUnavailable
 from comfylens.config import Config, ConfigError, load_config
 from comfylens.db.connection import CatalogMissing, connect_readonly
 from comfylens.extract.keys import CHAIN_SEPARATOR
@@ -24,11 +29,15 @@ from comfylens.extract.registry import unregistered
 from comfylens.extract.types import Extraction
 from comfylens.index.indexer import Indexer, IndexStatus, UnsafeLocation
 from comfylens.index.lock import IndexLocked
-from comfylens.paths import catalog_path
+from comfylens.paths import catalog_path, collection_dir
 from comfylens.report import build_report, render_report
 from comfylens.version import EXTRACTOR_VERSION, SCHEMA_VERSION
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+collection_app = typer.Typer(
+    no_args_is_help=True, help="Back up and restore the saved-prompt collection."
+)
+app.add_typer(collection_app, name="collection")
 
 
 @app.callback()
@@ -455,3 +464,67 @@ def _print_extraction(console: Console, e: Extraction) -> None:
         )
     reachable = sum(1 for g in e.generic_inputs if g.reachable)
     console.print(f"Generic inputs: {len(e.generic_inputs)} ({reachable} reachable)")
+
+
+def _collection() -> CollectionStore:
+    try:
+        return CollectionStore(collection_dir())
+    except CollectionUnavailable as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@collection_app.command("export")
+def export_collection(
+    target: Annotated[
+        Path | None,
+        typer.Argument(
+            help="Zip file to write, or a directory for a dated file in it"
+            " (default: the current directory)."
+        ),
+    ] = None,
+    force: Annotated[bool, typer.Option("--force", help="Replace an existing file.")] = False,
+) -> None:
+    """Write every saved prompt and its images to one zip, the same as Export in the UI."""
+    path = target or Path.cwd()
+    if path.is_dir():
+        path = path / f"comfylens-collection-{date.today().isoformat()}.zip"
+    if path.exists() and not force:
+        typer.echo(f"error: {path} exists; pass --force to replace it", err=True)
+        raise typer.Exit(1)
+    if not path.parent.is_dir():
+        typer.echo(f"error: {path.parent} is not a directory", err=True)
+        raise typer.Exit(1)
+    store = _collection()
+    # Written beside the target and renamed into place: a backup is never left half-written.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".comfylens-export-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as out:
+            prompts, images = export_zip(store, out)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    typer.echo(f"Exported {_count(prompts, 'prompt')} and {_count(images, 'image')} to {path}")
+
+
+@collection_app.command("import")
+def import_collection(
+    archive: Annotated[
+        Path, typer.Argument(exists=True, dir_okay=False, readable=True, help="An exported zip.")
+    ],
+) -> None:
+    """Add the prompts of an exported zip; prompts already in the collection are skipped."""
+    store = _collection()
+    try:
+        with archive.open("rb") as f:
+            stats = import_zip(store, f)
+    except InvalidArchive as e:
+        typer.echo(f"error: {archive}: {e}", err=True)
+        raise typer.Exit(1) from e
+    already = f" ({stats.skipped} already here)" if stats.skipped else ""
+    typer.echo(f"Imported {_count(stats.added, 'prompt')}{already} from {archive}")
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}{'' if n == 1 else 's'}"

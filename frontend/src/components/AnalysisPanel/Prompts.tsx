@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import type { PromptGroup, PromptSide, TermRow } from "../../api/types";
+import { saveTextToCollection } from "../../lib/collection";
 import { fmtDateTime, fmtInt, fmtPct } from "../../lib/format";
 import { useFilters } from "../../state/filters";
 import { Glyph } from "../icons";
@@ -53,7 +54,15 @@ function Terms({ title, rows }: { title: string; rows: TermRow[] }) {
   );
 }
 
-function Group({ group, distinctive }: { group: PromptGroup; distinctive: ReactNode }) {
+function Group({
+  group,
+  side,
+  distinctive,
+}: {
+  group: PromptGroup;
+  side: PromptSide;
+  distinctive: ReactNode;
+}) {
   return (
     <>
       {distinctive}
@@ -88,8 +97,8 @@ function Group({ group, distinctive }: { group: PromptGroup; distinctive: ReactN
       </div>
       <ul className="space-y-1.5 text-xs">
         {group.distinct.map((p) => (
-          <li key={p.key}>
-            <details className="group">
+          <li key={p.key} className="flex items-start gap-1">
+            <details className="group min-w-0 flex-1">
               <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <Glyph
                   name="chevronRight"
@@ -108,6 +117,17 @@ function Group({ group, distinctive }: { group: PromptGroup; distinctive: ReactN
               </summary>
               <Thumbs ids={p.examples} hashes={p.example_hashes} />
             </details>
+            {/* Positive prompts only: a negative prompt alone is no style to come back to. */}
+            {side === "positive" && p.text && (
+              <Button
+                className="shrink-0 px-1"
+                title="Save to collection: the images with this prompt are its matches"
+                ariaLabel="Save this prompt to the collection"
+                onClick={() => void saveTextToCollection(p.text)}
+              >
+                <Glyph name="bookmarkPlus" className="size-3.5" />
+              </Button>
+            )}
           </li>
         ))}
       </ul>
@@ -173,7 +193,9 @@ export default function Prompts() {
         <Message>{query.isError ? query.error.message : "Loading…"}</Message>
       ) : (
         <FamilySections groups={query.data.groups} count={(g) => g.images}>
-          {(group) => <Group group={group} distinctive={distinctiveFor(group.family)} />}
+          {(group) => (
+            <Group group={group} side={side} distinctive={distinctiveFor(group.family)} />
+          )}
         </FamilySections>
       )}
     </div>

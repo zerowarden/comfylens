@@ -48,19 +48,32 @@ function ImagesField({
   images,
   adding,
   dragging,
+  note,
   onRemove,
   onPick,
 }: {
   images: CollectionImage[];
   adding: number;
   dragging: boolean;
+  /** Shown in place of the hint, so the field keeps its height. */
+  note: string | null;
   onRemove: (hash: string) => void;
   onPick: () => void;
 }) {
   const ring = dragging ? "border-sky-500 bg-sky-500/10" : "border-zinc-300 dark:border-zinc-700";
   return (
     <div className={`rounded border border-dashed p-2 ${ring}`}>
+      {/* The add tile comes first: new images appear after it and nothing moves. */}
       <div className="flex flex-wrap gap-1">
+        <button
+          type="button"
+          onClick={onPick}
+          title="Add reference images"
+          className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded border border-zinc-300 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+        >
+          <Glyph name="imagePlus" className="size-5" />
+          Add image
+        </button>
         {images.map((image) => (
           <div key={image.content_hash} className="group relative">
             <img
@@ -87,19 +100,17 @@ function ImagesField({
             Adding…
           </div>
         ))}
-        <button
-          type="button"
-          onClick={onPick}
-          title="Add reference images"
-          className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded border border-zinc-300 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-        >
-          <Glyph name="imagePlus" className="size-5" />
-          Add image
-        </button>
       </div>
-      <p className="mt-1 text-xs text-zinc-500">
-        Paste an image (Ctrl+V), drop files here, or click Add image. PNG, JPEG or WebP.
-      </p>
+      {/* One line either way: a wrapped note would push the fields below it down. */}
+      {note ? (
+        <p className="mt-1 truncate text-xs text-amber-700 dark:text-amber-400" title={note}>
+          {note}
+        </p>
+      ) : (
+        <p className="mt-1 truncate text-xs text-zinc-500">
+          Paste an image (Ctrl+V), drop files here, or click Add image. PNG, JPEG or WebP.
+        </p>
+      )}
     </div>
   );
 }
@@ -256,12 +267,14 @@ function EditorForm({ editor }: { editor: Editor }) {
       title={editor.mode === "new" ? "Save to collection" : "Edit saved prompt"}
       onClose={close}
       width="w-[720px]"
+      align="top"
     >
       <form onSubmit={(e) => void submit(e)} className="space-y-3">
         <ImagesField
           images={references}
           adding={adding}
           dragging={dragging}
+          note={note}
           onRemove={(hash) => setReferences(references.filter((r) => r.content_hash !== hash))}
           onPick={() => fileInput.current?.click()}
         />
@@ -277,7 +290,6 @@ function EditorForm({ editor }: { editor: Editor }) {
             void addFiles(files, false);
           }}
         />
-        {note && <p className="text-xs text-amber-700 dark:text-amber-400">{note}</p>}
         <Field label="Title">
           <input
             value={title}

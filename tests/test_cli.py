@@ -116,3 +116,54 @@ def test_serve_warns_off_loopback(tmp_path: Path, monkeypatch):
     assert calls == [("127.0.0.1", 8765), ("0.0.0.0", 9000)]
     assert cli._is_loopback("::1") and cli._is_loopback("localhost")
     assert not cli._is_loopback("192.168.1.5") and not cli._is_loopback("myhost")
+
+
+def _collection_with_a_prompt() -> None:
+    from comfylens.collection.store import CollectionStore, PromptData
+    from comfylens.paths import collection_dir
+
+    store = CollectionStore(collection_dir())
+    ref = store.put_original(png_with_text({}), "png", 32, 32, None, None)
+    store.create(PromptData(title="Fox", positive="a fox", references=[ref]))
+
+
+def test_collection_export_and_import(tmp_path: Path):
+    from datetime import date
+
+    from comfylens.paths import collection_dir
+
+    _collection_with_a_prompt()
+    result = runner.invoke(app, ["collection", "export", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    archive = tmp_path / f"comfylens-collection-{date.today().isoformat()}.zip"
+    assert archive.is_file()
+    assert "Exported 1 prompt and 1 image" in result.output
+    assert not list(tmp_path.glob(".comfylens-export-*"))  # no temporary file left behind
+
+    again = runner.invoke(app, ["collection", "export", str(archive)])
+    assert again.exit_code == 1 and "--force" in again.output
+    forced = runner.invoke(app, ["collection", "export", str(archive), "--force"])
+    assert forced.exit_code == 0, forced.output
+
+    # A fresh collection takes the archive; a second import adds nothing.
+    for path in collection_dir().iterdir():
+        if path.is_file():
+            path.unlink()
+    imported = runner.invoke(app, ["collection", "import", str(archive)])
+    assert imported.exit_code == 0, imported.output
+    assert "Imported 1 prompt from" in imported.output
+    repeat = runner.invoke(app, ["collection", "import", str(archive)])
+    assert "Imported 0 prompts (1 already here)" in repeat.output
+
+
+def test_collection_import_rejects_other_files(tmp_path: Path):
+    bogus = tmp_path / "notes.zip"
+    bogus.write_text("not a zip")
+    result = runner.invoke(app, ["collection", "import", str(bogus)])
+    assert result.exit_code == 1
+    assert "not a zip file" in result.output
+
+
+def test_collection_export_to_a_missing_directory(tmp_path: Path):
+    result = runner.invoke(app, ["collection", "export", str(tmp_path / "nope" / "x.zip")])
+    assert result.exit_code == 1 and "is not a directory" in result.output
