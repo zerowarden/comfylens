@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Built frontend (generated)
+src/comfylens/web/
+
+# Local images for the opt-in private test
+tests/fixtures/private/*
+!tests/fixtures/private/.gitkeep
+
+# Frontend dependencies
+node_modules/

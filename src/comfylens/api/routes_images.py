@@ -1,0 +1,242 @@
+"""Grid pages, id lists, detail, raw metadata, originals and thumbnails."""
+
+import json
+import os
+import re
+import sqlite3
+from typing import Any
+
+import polars as pl
+from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
+
+from comfylens.analytics.scope import filter_files
+from comfylens.api.schemas import (
+    IdsQuery,
+    IdsResponse,
+    ImageDetail,
+    ImagesPage,
+    ImagesQuery,
+    RawResponse,
+    Sort,
+)
+from comfylens.api.server import ApiError, Server, server_of
+from comfylens.extract.normalize import aspect, megapixels
+from comfylens.paths import thumb_path, thumbs_dir
+
+router = APIRouter(prefix="/api/images")
+thumbs_router = APIRouter()
+
+_SORT_COLUMNS = {
+    "generated_at": "generated_at",
+    "rel_path": "rel_path",
+    "family": "model_family",
+    "steps": "steps",
+    "cfg": "cfg",
+}
+_ITEM_COLUMNS = [
+    "id",
+    "content_hash",
+    "rel_path",
+    "width",
+    "height",
+    pl.col("model_family").alias("family"),
+    "generated_at",
+    "status",
+    "has_warnings",
+    "timestamp_suspect",
+]
+_THUMB_NAME = re.compile(r"[0-9a-f]{32}\.webp")
+_MEDIA_TYPES = {"png": "image/png", "jpeg": "image/jpeg"}
+
+
+def _sorted(server: Server, query: ImagesQuery | IdsQuery) -> pl.DataFrame:
+    files = filter_files(server.store.current, query.filters, server.search)
+    sort: Sort = query.sort
+    column = _SORT_COLUMNS[sort.key]
+    # Ties are broken by id, in the same direction.
+    return files.sort([column, "id"], descending=[sort.descending] * 2, nulls_last=True)
+
+
+@router.post("/query", response_model=ImagesPage)
+def query(body: ImagesQuery, request: Request) -> dict[str, Any]:
+    files = _sorted(server_of(request), body)
+    page = files.slice(body.offset, body.limit).select(_ITEM_COLUMNS)
+    return {"total": files.height, "offset": body.offset, "items": page.to_dicts()}
+
+
+@router.post("/ids", response_model=IdsResponse)
+def ids(body: IdsQuery, request: Request) -> dict[str, Any]:
+    return {"ids": _sorted(server_of(request), body)["id"].to_list()}
+
+
+def _rows(conn: sqlite3.Connection, sql: str, *params: Any) -> list[dict[str, Any]]:
+    cursor = conn.execute(sql, params)
+    names = [d[0] for d in cursor.description]
+    return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+
+
+def _file_row(conn: sqlite3.Connection, raw_id: str) -> dict[str, Any]:
+    """Ids are parsed here rather than by FastAPI: anything malformed is a plain 404."""
+    rows = _rows(conn, "SELECT * FROM files WHERE id = ?", int(raw_id)) if raw_id.isdigit() else []
+    if not rows:
+        raise ApiError(404, "not_found", f"no image with id {raw_id!r}")
+    return rows[0]
+
+
+@router.get("/{raw_id}", response_model=ImageDetail)
+def detail(raw_id: str, request: Request) -> dict[str, Any]:
+    conn = server_of(request).connect()
+    try:
+        f = _file_row(conn, raw_id)
+        file_id = f["id"]
+        w, h = f["width"], f["height"]
+        ratio, label = aspect(w, h) if w and h else (None, None)
+        gens = _rows(conn, "SELECT * FROM generations WHERE file_id = ?", file_id)
+        stages = _rows(
+            conn,
+            "SELECT stage_index AS 'index', node_id, class_type, seed, steps, cfg, sampler_name,"
+            " scheduler, denoise, start_step, end_step, model_family, base_model, text_encoder,"
+            " clip_type, lora_stack_key, positive_prompt, negative_prompt, guidance, shift,"
+            " latent_source FROM sampler_stages WHERE file_id = ? ORDER BY stage_index",
+            file_id,
+        )
+        loras = _rows(
+            conn,
+            "SELECT position, stage_index, node_id, entry, class_type, name_raw, name, base_name,"
+            " step, strength_model, strength_clip, enabled, reachable FROM loras"
+            " WHERE file_id = ? ORDER BY reachable DESC, stage_index, position IS NULL, position,"
+            " node_id, entry",
+            file_id,
+        )
+        inputs = _rows(
+            conn, "SELECT node_id, filename, sha256 FROM input_images WHERE file_id = ?", file_id
+        )
+        warnings = _rows(
+            conn, "SELECT code, node_id, message FROM warnings WHERE file_id = ?", file_id
+        )
+        reachable = dict(
+            conn.execute(
+                "SELECT node_id, reachable FROM nodes WHERE file_id = ?", (file_id,)
+            ).fetchall()
+        )
+        prompt = conn.execute(
+            "SELECT prompt_json FROM raw_metadata WHERE file_id = ?", (file_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    nodes = []
+    if prompt and prompt[0]:
+        for node_id, node in _json(prompt[0]).items():
+            if not isinstance(node, dict):
+                continue
+            meta = node.get("_meta")
+            title = meta.get("title") if isinstance(meta, dict) else None
+            nodes.append(
+                {
+                    "id": node_id,
+                    "class_type": str(node.get("class_type", "")),
+                    "title": title if isinstance(title, str) else None,
+                    "reachable": bool(reachable.get(node_id, False)),
+                    "inputs": node.get("inputs") if isinstance(node.get("inputs"), dict) else {},
+                }
+            )
+    for lora in loras:
+        lora["enabled"], lora["reachable"] = bool(lora["enabled"]), bool(lora["reachable"])
+    gen = gens[0] if gens else None
+    if gen is not None:
+        del gen["file_id"]
+    return {
+        "file": {
+            "id": f["id"],
+            "rel_path": f["rel_path"],
+            "format": f["format"],
+            "size": f["size"],
+            "width": w,
+            "height": h,
+            "megapixels": megapixels(w, h) if w and h else None,
+            "aspect": ratio,
+            "aspect_label": label,
+            "content_hash": f["content_hash"],
+            "generated_at": f["generated_at"],
+            "timestamp_suspect": bool(f["timestamp_suspect"]),
+            "status": f["status"],
+            "error": f["error"],
+        },
+        "generation": gen,
+        "stages": stages,
+        "loras": loras,
+        "input_images": inputs,
+        "nodes": nodes,
+        "warnings": warnings,
+    }
+
+
+def _json(text: str) -> Any:
+    # stdlib json accepts NaN; Pydantic then serializes it as null.
+    return json.loads(text)
+
+
+@router.get("/{raw_id}/raw", response_model=RawResponse)
+def raw(raw_id: str, request: Request) -> dict[str, Any]:
+    conn = server_of(request).connect()
+    try:
+        file_id = _file_row(conn, raw_id)["id"]
+        row = conn.execute(
+            "SELECT sources, prompt_json, workflow_json, other_json FROM raw_metadata"
+            " WHERE file_id = ?",
+            (file_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return {"sources": {}, "prompt": None, "workflow": None, "other": {}}
+    sources, prompt, workflow, other = row
+    others = {}
+    for key, text in (json.loads(other) if other else {}).items():
+        try:
+            others[key] = json.loads(text) if text.lstrip().startswith("{") else text
+        except ValueError:
+            others[key] = text
+    return {
+        "sources": json.loads(sources) if sources else {},
+        "prompt": _json(prompt) if prompt else None,
+        "workflow": _json(workflow) if workflow else None,
+        "other": others,
+    }
+
+
+@router.get("/{raw_id}/file", response_model=None)
+def original(raw_id: str, request: Request, download: bool = False) -> FileResponse:
+    """The original bytes. The path comes from the catalog only, never from the request."""
+    server = server_of(request)
+    conn = server.connect()
+    try:
+        f = _file_row(conn, raw_id)
+    finally:
+        conn.close()
+    path = os.path.normpath(os.path.join(server.root, f["rel_path"]))
+    if os.path.commonpath([path, server.root]) != str(server.root) or not os.path.isfile(path):
+        raise ApiError(404, "not_found", "the original file is missing")
+    return FileResponse(
+        path,
+        media_type=_MEDIA_TYPES.get(f["format"], "application/octet-stream"),
+        filename=os.path.basename(path),
+        content_disposition_type="attachment" if download else "inline",
+    )
+
+
+@thumbs_router.get("/thumbs/{name}", response_model=None)
+def thumbnail(name: str) -> FileResponse:
+    """Only a 32-character lowercase hex hash is accepted; anything else is 404."""
+    if not _THUMB_NAME.fullmatch(name):
+        raise ApiError(404, "not_found", "no such thumbnail")
+    path = thumb_path(thumbs_dir(), name.removesuffix(".webp"))
+    if not path.is_file():
+        raise ApiError(404, "not_found", "no such thumbnail")
+    return FileResponse(
+        path,
+        media_type="image/webp",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )

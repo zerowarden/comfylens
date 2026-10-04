@@ -1,0 +1,75 @@
+[server]
+host = "127.0.0.1"
+port = 8765
+open_browser = true
+
+[index]
+extensions = [".png", ".jpg", ".jpeg"]
+exclude_globs = ["**/.*/**"]          # hidden directories
+follow_symlinks = false
+workers = 0                            # 0 = os.cpu_count() - 2
+batch_size = 500                       # rows per DB transaction
+
+[thumbs]
+long_edge = 512
+quality = 82
+
+[analysis]
+group_by_family = true
+dedupe_identical_files = true
+round_decimals = 4                     # floats, for mode and grouping
+config_round_decimals = 2              # floats, for configuration keys
+top_n = 20
+histogram_bins = 20
+discrete_max_distinct = 25             # <= this many values: exact-value bars
+
+[prompts]
+max_phrase_words = 6
+max_ngram = 3
+min_df = 2
+template_threshold = 0.6               # share of prompts in scope
+template_min_scope = 5
+stopwords_file = ""                    # "" = bundled list
+distinctive_alpha0 = 500.0             # prior strength for distinctive terms
+
+[timestamps]
+source = "mtime"                       # "mtime" or "filename"
+filename_patterns = []                 # [{ regex = '...(?P<ts>...)...', format = "%Y%m%d-%H%M%S" }]
+burst_window_seconds = 2.0
+burst_min_distinct = 10
+
+[lora]
+step_suffix_regex = '^(?P<base>.+?)[_-](?P<step>\d{6,})$'
+
+[graph]
+output_classes = ["SaveImage", "PreviewImage", "SaveImageWebsocket", "Image Save", "SaveImageExtended"]
+output_name_regex = '(?i)(save|preview)'
+
+# First matching rule wins: specific rules before general ones.
+[[families]]
+name = "qwen-image-2.1"
+any = [{ unet_regex = '(?i)qwen[_-]?image[_-]?2\.1' }, { class_regex = '^TextEncodeQwenImage21$' }]
+
+[[families]]
+name = "qwen-image"
+any = [{ unet_regex = '(?i)qwen[_-]?image' }, { clip_type = "qwen_image" }]
+
+[[families]]
+name = "krea-2"                         # local Krea 2 (K2): CLIPLoader type krea2
+any = [{ clip_type = "krea2" }, { unet_regex = '(?i)krea[_-]?2' }]
+
+[[families]]
+name = "krea-2-api"                     # Krea 2 through the hosted Krea API node
+any = [{ class_regex = '^Krea2ImageNode$' }]
+
+[[families]]
+name = "flux1-krea"                     # FLUX.1 Krea [dev]; after krea-2, before flux
+any = [{ unet_regex = '(?i)krea' }]
+
+[[families]]
+name = "flux"
+any = [{ unet_regex = '(?i)flux' }, { clip_type = "flux" }]
+
+[[families]]
+name = "ideogram"
+any = [{ class_regex = '(?i)^ideogram' }]

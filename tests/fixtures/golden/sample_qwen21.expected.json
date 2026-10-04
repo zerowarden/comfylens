@@ -1,0 +1,399 @@
+{
+  "versions": {
+    "extractor": 1,
+    "schema": 1
+  },
+  "status": "ok",
+  "error": null,
+  "file": {
+    "format": "png",
+    "width": 32,
+    "height": 32,
+    "megapixels": 0.001,
+    "aspect": 1.0,
+    "aspect_label": "1:1"
+  },
+  "raw_keys": [
+    {
+      "key": "prompt",
+      "source": "png:tEXt",
+      "kind": "api_prompt",
+      "chars": 2390
+    },
+    {
+      "key": "workflow",
+      "source": "png:tEXt",
+      "kind": "workflow",
+      "chars": 7833
+    }
+  ],
+  "outputs": [
+    "12"
+  ],
+  "nodes": [
+    {
+      "id": "1",
+      "class_type": "UNETLoader",
+      "title": "Load Diffusion Model",
+      "reachable": true
+    },
+    {
+      "id": "11",
+      "class_type": "LoraLoaderModelOnly",
+      "title": "Load LoRA",
+      "reachable": true
+    },
+    {
+      "id": "2",
+      "class_type": "CLIPLoader",
+      "title": "Load CLIP",
+      "reachable": true
+    },
+    {
+      "id": "27",
+      "class_type": "LoadImage",
+      "title": "Load Image",
+      "reachable": true
+    },
+    {
+      "id": "29",
+      "class_type": "LoraLoaderModelOnly",
+      "title": "Load LoRA",
+      "reachable": true
+    },
+    {
+      "id": "3",
+      "class_type": "VAELoader",
+      "title": "Load VAE",
+      "reachable": true
+    },
+    {
+      "id": "9",
+      "class_type": "TextEncodeQwenImage21",
+      "title": "Text Encode Qwen Image 2.1",
+      "reachable": true
+    },
+    {
+      "id": "6",
+      "class_type": "KSampler",
+      "title": "KSampler",
+      "reachable": true
+    },
+    {
+      "id": "7",
+      "class_type": "VAEDecode",
+      "title": "VAE Decode",
+      "reachable": true
+    },
+    {
+      "id": "12",
+      "class_type": "PreviewImage",
+      "title": "Preview Image",
+      "reachable": true
+    },
+    {
+      "id": "25",
+      "class_type": "LoraLoaderModelOnly",
+      "title": "Load LoRA",
+      "reachable": false
+    },
+    {
+      "id": "28",
+      "class_type": "VAEEncodeForInpaint",
+      "title": "Encode for Inpaint (masked regions only)",
+      "reachable": false
+    }
+  ],
+  "unregistered": [],
+  "extraction": {
+    "stages": [
+      {
+        "index": 0,
+        "node_id": "6",
+        "class_type": "KSampler",
+        "seed": 898921074692413,
+        "steps": 25,
+        "cfg": 2.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 0.97,
+        "start_step": null,
+        "end_step": null,
+        "model_family": "qwen-image-2.1",
+        "base_model": "qwen_image_2.1_int8_convrot",
+        "text_encoder": "qwen3vl_8b_int8_convrot",
+        "clip_type": "qwen_image",
+        "lora_stack_key": "qwen2.1-anime2real-sunburst@1.13 + qwen2.1-lenovo-ultrareal@1.06",
+        "positive_prompt": "Convert the image into a realistic photograph.\n\nPreserve the character's identity, pose, facial expression, hairstyle,\nclothing design, colors, accessories, composition, camera angle, and\nspatial arrangement from the reference image.\n\n\n",
+        "negative_prompt": "plastic, blur, low quality, text",
+        "guidance": null,
+        "shift": null,
+        "latent_source": "TextEncodeQwenImage21"
+      }
+    ],
+    "model_family": "qwen-image-2.1",
+    "base_model": "qwen_image_2.1_int8_convrot",
+    "text_encoders": [
+      "qwen3vl_8b_int8_convrot"
+    ],
+    "clip_type": "qwen_image",
+    "vae": "qwen_image_2.1_vae_bf16",
+    "loras": [
+      {
+        "position": 0,
+        "stage_index": 0,
+        "node_id": "11",
+        "entry": "",
+        "class_type": "LoraLoaderModelOnly",
+        "name_raw": "qwen2.1-anime2real-sunburst.safetensors",
+        "name": "qwen2.1-anime2real-sunburst",
+        "base_name": "qwen2.1-anime2real-sunburst",
+        "step": null,
+        "strength_model": 1.13,
+        "strength_clip": null,
+        "enabled": true,
+        "reachable": true
+      },
+      {
+        "position": 1,
+        "stage_index": 0,
+        "node_id": "29",
+        "entry": "",
+        "class_type": "LoraLoaderModelOnly",
+        "name_raw": "qwen2.1-lenovo-ultrareal.safetensors",
+        "name": "qwen2.1-lenovo-ultrareal",
+        "base_name": "qwen2.1-lenovo-ultrareal",
+        "step": null,
+        "strength_model": 1.06,
+        "strength_clip": null,
+        "enabled": true,
+        "reachable": true
+      },
+      {
+        "position": null,
+        "stage_index": null,
+        "node_id": "25",
+        "entry": "",
+        "class_type": "LoraLoaderModelOnly",
+        "name_raw": "qwen2.1-exampleV01_000004956.safetensors",
+        "name": "qwen2.1-exampleV01_000004956",
+        "base_name": "qwen2.1-exampleV01",
+        "step": 4956,
+        "strength_model": 0.97,
+        "strength_clip": null,
+        "enabled": true,
+        "reachable": false
+      }
+    ],
+    "positive_prompt": "Convert the image into a realistic photograph.\n\nPreserve the character's identity, pose, facial expression, hairstyle,\nclothing design, colors, accessories, composition, camera angle, and\nspatial arrangement from the reference image.\n\n\n",
+    "negative_prompt": "plastic, blur, low quality, text",
+    "guidance": null,
+    "shift": null,
+    "latent_source": "TextEncodeQwenImage21",
+    "batch_size": null,
+    "input_images": [
+      {
+        "node_id": "27",
+        "filename": "pasted-image.png",
+        "sha256": "d22bc0fc91f29d00bf88aefca945c5bb16f6de426db9025788902c04e45ac099"
+      }
+    ],
+    "generic_inputs": [
+      {
+        "node_id": "1",
+        "class_type": "UNETLoader",
+        "input_name": "unet_name",
+        "kind": "str",
+        "value": "qwen_image_2.1_int8_convrot.safetensors",
+        "reachable": true
+      },
+      {
+        "node_id": "1",
+        "class_type": "UNETLoader",
+        "input_name": "weight_dtype",
+        "kind": "str",
+        "value": "default",
+        "reachable": true
+      },
+      {
+        "node_id": "2",
+        "class_type": "CLIPLoader",
+        "input_name": "clip_name",
+        "kind": "str",
+        "value": "qwen3vl_8b_int8_convrot.safetensors",
+        "reachable": true
+      },
+      {
+        "node_id": "2",
+        "class_type": "CLIPLoader",
+        "input_name": "type",
+        "kind": "str",
+        "value": "qwen_image",
+        "reachable": true
+      },
+      {
+        "node_id": "2",
+        "class_type": "CLIPLoader",
+        "input_name": "device",
+        "kind": "str",
+        "value": "default",
+        "reachable": true
+      },
+      {
+        "node_id": "3",
+        "class_type": "VAELoader",
+        "input_name": "vae_name",
+        "kind": "str",
+        "value": "qwen_image_2.1_vae_bf16.safetensors",
+        "reachable": true
+      },
+      {
+        "node_id": "6",
+        "class_type": "KSampler",
+        "input_name": "seed",
+        "kind": "num",
+        "value": 898921074692413,
+        "reachable": true
+      },
+      {
+        "node_id": "6",
+        "class_type": "KSampler",
+        "input_name": "steps",
+        "kind": "num",
+        "value": 25,
+        "reachable": true
+      },
+      {
+        "node_id": "6",
+        "class_type": "KSampler",
+        "input_name": "cfg",
+        "kind": "num",
+        "value": 2.0,
+        "reachable": true
+      },
+      {
+        "node_id": "6",
+        "class_type": "KSampler",
+        "input_name": "sampler_name",
+        "kind": "str",
+        "value": "euler",
+        "reachable": true
+      },
+      {
+        "node_id": "6",
+        "class_type": "KSampler",
+        "input_name": "scheduler",
+        "kind": "str",
+        "value": "simple",
+        "reachable": true
+      },
+      {
+        "node_id": "6",
+        "class_type": "KSampler",
+        "input_name": "denoise",
+        "kind": "num",
+        "value": 0.97,
+        "reachable": true
+      },
+      {
+        "node_id": "9",
+        "class_type": "TextEncodeQwenImage21",
+        "input_name": "prompt",
+        "kind": "str",
+        "value": "Convert the image into a realistic photograph.\n\nPreserve the character's identity, pose, facial expression, hairstyle,\nclothing design, colors, accessories, composition, camera angle, and\nspatial arrangement from the reference image.\n\n\n",
+        "reachable": true
+      },
+      {
+        "node_id": "9",
+        "class_type": "TextEncodeQwenImage21",
+        "input_name": "negative_prompt",
+        "kind": "str",
+        "value": "plastic, blur, low quality, text",
+        "reachable": true
+      },
+      {
+        "node_id": "9",
+        "class_type": "TextEncodeQwenImage21",
+        "input_name": "resolution",
+        "kind": "num",
+        "value": 1216,
+        "reachable": true
+      },
+      {
+        "node_id": "11",
+        "class_type": "LoraLoaderModelOnly",
+        "input_name": "lora_name",
+        "kind": "str",
+        "value": "qwen2.1-anime2real-sunburst.safetensors",
+        "reachable": true
+      },
+      {
+        "node_id": "11",
+        "class_type": "LoraLoaderModelOnly",
+        "input_name": "strength_model",
+        "kind": "num",
+        "value": 1.13,
+        "reachable": true
+      },
+      {
+        "node_id": "25",
+        "class_type": "LoraLoaderModelOnly",
+        "input_name": "lora_name",
+        "kind": "str",
+        "value": "qwen2.1-exampleV01_000004956.safetensors",
+        "reachable": false
+      },
+      {
+        "node_id": "25",
+        "class_type": "LoraLoaderModelOnly",
+        "input_name": "strength_model",
+        "kind": "num",
+        "value": 0.97,
+        "reachable": false
+      },
+      {
+        "node_id": "27",
+        "class_type": "LoadImage",
+        "input_name": "image",
+        "kind": "str",
+        "value": "pasted-image.png",
+        "reachable": true
+      },
+      {
+        "node_id": "28",
+        "class_type": "VAEEncodeForInpaint",
+        "input_name": "grow_mask_by",
+        "kind": "num",
+        "value": 6,
+        "reachable": false
+      },
+      {
+        "node_id": "29",
+        "class_type": "LoraLoaderModelOnly",
+        "input_name": "lora_name",
+        "kind": "str",
+        "value": "qwen2.1-lenovo-ultrareal.safetensors",
+        "reachable": true
+      },
+      {
+        "node_id": "29",
+        "class_type": "LoraLoaderModelOnly",
+        "input_name": "strength_model",
+        "kind": "num",
+        "value": 1.06,
+        "reachable": true
+      }
+    ],
+    "lora_stack_key": "qwen2.1-anime2real-sunburst@1.13 + qwen2.1-lenovo-ultrareal@1.06",
+    "config_key": "[\"qwen-image-2.1\",\"qwen_image_2.1_int8_convrot\",\"qwen2.1-anime2real-sunburst@1.13 + qwen2.1-lenovo-ultrareal@1.06\",\"euler\",\"simple\",25,2.0,0.97,null,null]",
+    "generation_key": "b5cf24910a5bfa86",
+    "text_encoder": "qwen3vl_8b_int8_convrot"
+  },
+  "warnings": [
+    {
+      "code": "UNUSED_LORA",
+      "node_id": "25",
+      "message": "LoRA loaded but not connected to any sampler"
+    }
+  ]
+}
