@@ -13,5 +13,6 @@ export function imageItem(id: number, relPath = `${id}.png`): ImageItem {
     status: "ok",
     has_warnings: false,
     timestamp_suspect: false,
+    saved: false,
   };
 }

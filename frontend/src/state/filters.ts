@@ -26,6 +26,8 @@ export const emptyFilters = (): Filters => ({
   text: "",
   numeric: {},
   has_warnings: null,
+  saved: null,
+  saved_prompt: null,
 });
 
 export const defaultSort = (): Sort => ({ key: "generated_at", descending: true });
@@ -42,7 +44,9 @@ export function hasActiveFilters(f: Filters): boolean {
     f.statuses.length > 0 ||
     f.text.trim() !== "" ||
     Object.keys(f.numeric).length > 0 ||
-    f.has_warnings !== null
+    f.has_warnings !== null ||
+    f.saved !== null ||
+    f.saved_prompt !== null
   );
 }
 
@@ -70,6 +74,8 @@ export function toSearch(filters: Filters, sort: Sort): string {
     if (range) p.set(field, `${range[0]},${range[1]}`);
   }
   if (filters.has_warnings !== null) p.set("warnings", filters.has_warnings ? "yes" : "no");
+  if (filters.saved !== null) p.set("saved", filters.saved ? "yes" : "no");
+  if (filters.saved_prompt !== null) p.set("prompt", String(filters.saved_prompt));
   const d = defaultSort();
   if (sort.key !== d.key) p.set("sort", sort.key);
   if (sort.descending !== d.descending) p.set("order", sort.descending ? "desc" : "asc");
@@ -109,6 +115,10 @@ export function fromSearch(search: string): { filters: Filters; sort: Sort } {
   }
   const warnings = p.get("warnings");
   filters.has_warnings = warnings === "yes" ? true : warnings === "no" ? false : null;
+  const saved = p.get("saved");
+  filters.saved = saved === "yes" ? true : saved === "no" ? false : null;
+  const prompt = p.get("prompt");
+  filters.saved_prompt = prompt && /^[1-9]\d{0,15}$/.test(prompt) ? Number(prompt) : null;
 
   const sort = defaultSort();
   const key = p.get("sort");

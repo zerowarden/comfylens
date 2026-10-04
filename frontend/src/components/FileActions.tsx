@@ -10,16 +10,17 @@ import {
   type ReactNode,
 } from "react";
 
+import { saveImageToCollection } from "../lib/collection";
 import { cachedRelPath, renameImage, trashImages } from "../lib/fileActions";
 import { baseName, extension, nameProblem } from "../lib/files";
 import { fmtInt } from "../lib/format";
 import { useImageDetail } from "../lib/images";
+import { useCollection } from "../state/collection";
 import { useFileActions, type ContextMenu } from "../state/fileActions";
 import { Glyph } from "./icons";
-import { Button } from "./ui";
+import { Button, PRIMARY } from "./ui";
 
 const TRASH_LISTED = 5; // file names the trash dialog lists before "and N more"
-const PRIMARY = "rounded border px-2 py-0.5 text-xs font-medium text-white disabled:opacity-40";
 
 /** The right-click menu on images, its rename and trash dialogs, and the notice of outcomes. */
 export default function FileActions() {
@@ -46,6 +47,7 @@ function keepKeys(e: KeyboardEvent) {
 function Menu({ menu }: { menu: ContextMenu }) {
   const closeMenu = useFileActions((s) => s.closeMenu);
   const openDialog = useFileActions((s) => s.openDialog);
+  const openLinking = useCollection((s) => s.openLinking);
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: menu.x, top: menu.y });
 
@@ -116,6 +118,26 @@ function Menu({ menu }: { menu: ContextMenu }) {
         >
           Rename…
         </MenuItem>
+        <MenuItem
+          disabled={many}
+          title={many ? "Select a single image to save it as a new prompt" : undefined}
+          onSelect={() => {
+            closeMenu();
+            void saveImageToCollection(menu.ids[0]!);
+          }}
+        >
+          Save to collection…
+        </MenuItem>
+        <MenuItem
+          onSelect={() => {
+            closeMenu();
+            openLinking(menu.ids);
+          }}
+        >
+          {many
+            ? `Add ${fmtInt(menu.ids.length)} images to a saved prompt…`
+            : "Add to saved prompt…"}
+        </MenuItem>
         <MenuItem danger onSelect={() => openDialog({ kind: "trash", ids: menu.ids })}>
           {many ? `Move ${fmtInt(menu.ids.length)} images to trash…` : "Move to trash…"}
         </MenuItem>
@@ -153,14 +175,17 @@ function MenuItem({
   );
 }
 
-function Modal({
+export function Modal({
   title,
   onClose,
   children,
+  width = "w-[460px]",
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** A Tailwind width class. */
+  width?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Close on a click that both starts and ends on the backdrop: a text selection dragged out of
@@ -175,7 +200,9 @@ function Modal({
     } else if (e.key === "Tab") {
       // Keep focus inside the dialog.
       const focusable = [
-        ...(ref.current?.querySelectorAll<HTMLElement>("input, button:not(:disabled)") ?? []),
+        ...(ref.current?.querySelectorAll<HTMLElement>(
+          "input, textarea, select, a[href], button:not(:disabled)",
+        ) ?? []),
       ];
       const first = focusable[0];
       const last = focusable.at(-1);
@@ -206,7 +233,7 @@ function Modal({
         aria-label={title}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="w-[460px] max-w-[90vw] rounded-lg bg-white p-4 shadow-2xl outline-none dark:bg-zinc-900"
+        className={`${width} max-h-[90vh] max-w-[90vw] overflow-y-auto rounded-lg bg-white p-4 shadow-2xl outline-none dark:bg-zinc-900`}
       >
         <h2 className="mb-3 font-semibold">{title}</h2>
         {children}

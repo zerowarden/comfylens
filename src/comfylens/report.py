@@ -11,7 +11,7 @@ from rich.markup import escape
 from rich.table import Column, Table
 
 from comfylens import version
-from comfylens.analytics.scope import Scope, resolve
+from comfylens.analytics.scope import NO_LOOKUP, Scope, resolve
 from comfylens.analytics.snapshot import Snapshot, snapshot_from_conn
 from comfylens.analytics.stats import compute_stats
 from comfylens.config import Config
@@ -123,7 +123,7 @@ def _per_family(snap: Snapshot, config: Config, only: str | None) -> list[dict[s
     Uses the same snapshot and statistics as the UI, so the two cannot disagree.
     """
     analysis = config.analysis
-    resolved = resolve(snap, Scope(), analysis, search=lambda _text: set())
+    resolved = resolve(snap, Scope(), analysis, NO_LOOKUP)
     blocks = compute_stats(snap, resolved, ["numeric", "loras", "configs"], "name", analysis)
     out = []
     for block in blocks:

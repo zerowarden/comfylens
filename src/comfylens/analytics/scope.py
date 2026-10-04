@@ -1,9 +1,8 @@
 """Selection and filters -> the files a request covers."""
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import polars as pl
 from pydantic import BaseModel
@@ -12,8 +11,35 @@ from comfylens.analytics.snapshot import NO_METADATA, Snapshot
 from comfylens.config import AnalysisConfig
 from comfylens.metadata.types import Status
 
-# Prompt search: text -> ids of files whose positive or negative prompt matches.
-TextSearch = Callable[[str], set[int]]
+
+class Lookup(Protocol):
+    """What filters need beyond the snapshot: prompt search and the saved-prompt collection."""
+
+    def search(self, text: str) -> set[int]:
+        """Ids of files whose positive or negative prompt contains `text`."""
+        ...
+
+    def saved_hashes(self) -> frozenset[str]:
+        """Content hashes linked to any saved prompt."""
+        ...
+
+    def saved_prompt_ids(self, prompt_id: int) -> set[int]:
+        """Ids of files linked to the saved prompt or sharing its positive prompt."""
+        ...
+
+
+class _NoLookup:
+    def search(self, text: str) -> set[int]:
+        return set()
+
+    def saved_hashes(self) -> frozenset[str]:
+        return frozenset()
+
+    def saved_prompt_ids(self, prompt_id: int) -> set[int]:
+        return set()
+
+
+NO_LOOKUP: Lookup = _NoLookup()  # matches nothing: for callers without a server
 
 NumericFilterField = Literal["steps", "cfg", "denoise", "guidance", "shift"]
 
@@ -35,6 +61,8 @@ class Filters(BaseModel):
     text: str = ""  # prompt search, both sides
     numeric: dict[NumericFilterField, tuple[float, float]] = {}  # inclusive ranges
     has_warnings: bool | None = None
+    saved: bool | None = None  # content hash linked to any saved prompt (or to none)
+    saved_prompt: int | None = None  # one saved prompt's files: linked, or the same prompt
 
 
 class Scope(BaseModel):
@@ -69,12 +97,19 @@ def is_filtered(f: Filters) -> bool:
     dates = f.date_from is not None or f.date_to is not None
     lists = any(getattr(f, name) for name in _LIST_FILTERS)
     return bool(
-        lists or dates or f.loras.names or f.text.strip() or f.numeric or f.has_warnings is not None
+        lists
+        or dates
+        or f.loras.names
+        or f.text.strip()
+        or f.numeric
+        or f.has_warnings is not None
+        or f.saved is not None
+        or f.saved_prompt is not None
     )
 
 
 def filter_files(
-    snap: Snapshot, f: Filters, search: TextSearch, *, ignore_dates: bool = False
+    snap: Snapshot, f: Filters, lookup: Lookup, *, ignore_dates: bool = False
 ) -> pl.DataFrame:
     """Files matching every filter; empty filters mean the whole library."""
     conditions: list[pl.Expr] = []
@@ -100,7 +135,14 @@ def filter_files(
             pl.col("id").is_in(_lora_ids(snap, f.loras.names, f.loras.mode).implode())
         )
     if f.text.strip():
-        conditions.append(pl.col("id").is_in(sorted(search(f.text.strip()))))
+        conditions.append(pl.col("id").is_in(sorted(lookup.search(f.text.strip()))))
+    if f.saved is not None:
+        hashes = pl.Series(sorted(lookup.saved_hashes()), dtype=pl.String)
+        saved = pl.col("content_hash").is_in(hashes.implode())
+        conditions.append(saved if f.saved else ~saved)
+    if f.saved_prompt is not None:
+        ids = pl.Series(sorted(lookup.saved_prompt_ids(f.saved_prompt)), dtype=pl.Int64)
+        conditions.append(pl.col("id").is_in(ids.implode()))
     return snap.images.filter(*conditions) if conditions else snap.images
 
 
@@ -113,12 +155,12 @@ def _lora_ids(snap: Snapshot, names: list[str], mode: str) -> pl.Series:
     return uses["file_id"].unique()
 
 
-def resolve(snap: Snapshot, scope: Scope, analysis: AnalysisConfig, search: TextSearch) -> Resolved:
+def resolve(snap: Snapshot, scope: Scope, analysis: AnalysisConfig, lookup: Lookup) -> Resolved:
     if scope.selection:
         files = snap.images.filter(pl.col("id").is_in(scope.selection))
         kind = "selection"
     else:
-        files = filter_files(snap, scope.filters, search)
+        files = filter_files(snap, scope.filters, lookup)
         kind = "filtered" if is_filtered(scope.filters) else "all"
 
     rows = files.filter(pl.col("has_generation"))

@@ -29,11 +29,15 @@ describe("URL sync", () => {
       text: "realistic photograph",
       numeric: { cfg: [1.5, 3], steps: [20, 40] },
       has_warnings: false,
+      saved: true,
+      saved_prompt: 12,
     };
     const sort = { key: "cfg" as const, descending: false };
     const search = toSearch(filters, sort);
     expect(search).toContain("family=qwen-image-2.1");
     expect(search).toContain("lora_mode=all");
+    expect(search).toContain("saved=yes");
+    expect(search).toContain("prompt=12");
     expect(fromSearch(search)).toEqual({ filters, sort });
     expect(fromSearch(`?${search}`)).toEqual({ filters, sort });
   });
@@ -47,6 +51,20 @@ describe("URL sync", () => {
     expect(filters.numeric).toEqual({});
     expect(filters.has_warnings).toBeNull();
     expect(sort).toEqual(defaultSort());
+  });
+
+  it("accepts only a positive integer saved prompt and a yes/no saved flag", () => {
+    for (const bad of ["prompt=abc", "prompt=0", "prompt=-3", "prompt=1.5", "saved=maybe"]) {
+      const { filters } = fromSearch(bad);
+      expect(filters.saved_prompt).toBeNull();
+      expect(filters.saved).toBeNull();
+    }
+    expect(fromSearch("saved=no").filters.saved).toBe(false);
+  });
+
+  it("counts the collection filters as active", () => {
+    expect(hasActiveFilters({ ...emptyFilters(), saved: false })).toBe(true);
+    expect(hasActiveFilters({ ...emptyFilters(), saved_prompt: 3 })).toBe(true);
   });
 });
 

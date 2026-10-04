@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { parseViewHash, type View } from "../lib/viewHash";
+
 export type Tab = "overview" | "loras" | "configs" | "prompts" | "resolution" | "advanced";
 export type Theme = "dark" | "light";
 
@@ -23,6 +25,7 @@ function remember(key: string, value: string): void {
 }
 
 interface UiStore {
+  view: View;
   tileSize: number;
   pool: boolean;
   detailId: number | null;
@@ -33,6 +36,7 @@ interface UiStore {
   panelOpen: boolean;
   panelWidth: number;
   tab: Tab;
+  setView: (view: View) => void;
   setTileSize: (size: number) => void;
   setPool: (pool: boolean) => void;
   openDetail: (id: number | null) => void;
@@ -50,6 +54,7 @@ export const PANEL_MIN = 320;
 export const PANEL_MAX = 900;
 
 export const useUi = create<UiStore>((set) => ({
+  view: typeof window === "undefined" ? "library" : parseViewHash(window.location.hash).view,
   tileSize: 180,
   pool: false,
   detailId: null,
@@ -59,6 +64,7 @@ export const useUi = create<UiStore>((set) => ({
   panelOpen: true,
   panelWidth: 480,
   tab: "overview",
+  setView: (view) => set({ view }),
   setTileSize: (tileSize) => set({ tileSize: Math.min(TILE_MAX, Math.max(TILE_MIN, tileSize)) }),
   setPool: (pool) => set({ pool }),
   openDetail: (detailId) => set({ detailId }),

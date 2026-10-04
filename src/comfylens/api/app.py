@@ -10,7 +10,14 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from comfylens.api import routes_images, routes_index, routes_library, routes_prompts, routes_stats
+from comfylens.api import (
+    routes_collection,
+    routes_images,
+    routes_index,
+    routes_library,
+    routes_prompts,
+    routes_stats,
+)
 from comfylens.api.server import ALLOWED_HOSTS, ApiError, Server, error_response
 from comfylens.config import Config
 from comfylens.index.watch import DEBOUNCE_MS
@@ -67,7 +74,14 @@ def create_app(
     async def _internal(_request: Request, e: Exception) -> JSONResponse:
         return error_response(500, "internal", f"{type(e).__name__}: {e}")
 
-    for module in (routes_library, routes_index, routes_images, routes_stats, routes_prompts):
+    for module in (
+        routes_library,
+        routes_index,
+        routes_images,
+        routes_stats,
+        routes_prompts,
+        routes_collection,
+    ):
         app.include_router(module.router)
     app.include_router(routes_images.thumbs_router)
 

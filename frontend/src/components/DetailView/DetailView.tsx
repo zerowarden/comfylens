@@ -9,6 +9,7 @@ import { useImageDetail, useImageOrder } from "../../lib/images";
 import { useFileActions } from "../../state/fileActions";
 import { useUi } from "../../state/ui";
 import { chainKind } from "../../lib/chains";
+import CollectionSection from "../Collection/CollectionSection";
 import { ChainText, Glyph } from "../icons";
 import { CloseButton, CopyButton, td } from "../ui";
 import LoraChain from "./LoraChain";
@@ -108,6 +109,7 @@ function Details({ id }: { id: number }) {
           Download original
         </a>
       </div>
+      <CollectionSection id={id} />
       <Settings d={d} />
       {d.generation && <LoraChain detail={d} />}
       {d.stages.length > 1 && (

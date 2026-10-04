@@ -5,6 +5,7 @@ import type { ImageItem } from "../api/types";
 import { familyColor } from "../lib/colors";
 import { fmtDateTime } from "../lib/format";
 import { useThumbnailFailure } from "../lib/images";
+import { Glyph } from "./icons";
 
 interface TileProps {
   id: number;
@@ -54,6 +55,14 @@ function Tile({ id, item, size, selected, onClick, onOpen, onContextMenu }: Tile
             title={item.family ?? "no metadata"}
           />
           <span className="flex-1" />
+          {item.saved && (
+            <span
+              className="rounded bg-sky-600/90 p-0.5 text-white"
+              title="In your prompt collection"
+            >
+              <Glyph name="bookmark" label="Saved" className="size-3" />
+            </span>
+          )}
           {item.timestamp_suspect && (
             <span
               className="rounded bg-amber-500/90 px-1 text-[10px] text-black"

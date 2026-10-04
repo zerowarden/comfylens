@@ -1,29 +1,40 @@
 import type {
+  CollectionList,
+  DeleteResponse,
   DistinctiveRequest,
   DistinctiveResponse,
+  Draft,
   Facets,
   IdsQuery,
   IdsResponse,
+  ImageCollection,
   ImageDetail,
   ImagesPage,
   ImagesQuery,
   IndexStatusModel,
   LibraryInfo,
+  LinkRequest,
+  LinkResponse,
   NodeKeysResponse,
   NodeStatsRequest,
   NodeStatsResponse,
+  PromptInput,
   PromptsRequest,
   PromptsResponse,
+  RawOriginal,
   RawResponse,
   RenameRequest,
   RenameResponse,
+  SavedPrompt,
   Scope,
   StatsRequest,
   StatsResponse,
+  TextDraftRequest,
   TimelineRequest,
   TimelineResponse,
   TrashRequest,
   TrashResponse,
+  UnlinkRequest,
 } from "./types";
 
 export class ApiError extends Error {
@@ -49,7 +60,21 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         };
-  const response = await fetch(path, init);
+  return parse<T>(await fetch(path, init));
+}
+
+/** POST a file as the raw request body. */
+async function upload<T>(path: string, file: Blob): Promise<T> {
+  return parse<T>(
+    await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    }),
+  );
+}
+
+async function parse<T>(response: Response): Promise<T> {
   if (response.ok) return (await response.json()) as T;
 
   let payload: unknown = null;
@@ -89,7 +114,34 @@ export const api = {
     request<DistinctiveResponse>("/api/prompts/distinctive", q),
   nodeKeys: (q: Scope) => request<NodeKeysResponse>("/api/node-inputs/keys", q),
   nodeStats: (q: NodeStatsRequest) => request<NodeStatsResponse>("/api/node-inputs/stats", q),
+  collection: (q: { q?: string; tag?: string | null; family?: string | null }) => {
+    const p = new URLSearchParams();
+    if (q.q?.trim()) p.set("q", q.q.trim());
+    if (q.tag) p.set("tag", q.tag);
+    if (q.family) p.set("family", q.family);
+    const search = p.toString();
+    return request<CollectionList>(`/api/collection/prompts${search ? `?${search}` : ""}`);
+  },
+  savedPrompt: (id: number) => request<SavedPrompt>(`/api/collection/prompts/${id}`),
+  createPrompt: (body: PromptInput) => request<SavedPrompt>("/api/collection/prompts", body),
+  updatePrompt: (id: number, body: PromptInput) =>
+    request<SavedPrompt>(`/api/collection/prompts/${id}`, body),
+  deletePrompt: (id: number) => request<DeleteResponse>(`/api/collection/prompts/${id}/delete`, {}),
+  linkAttempts: (id: number, fileIds: number[]) =>
+    request<LinkResponse>(`/api/collection/prompts/${id}/attempts`, {
+      file_ids: fileIds,
+    } satisfies LinkRequest),
+  unlinkAttempts: (id: number, hashes: string[]) =>
+    request<SavedPrompt>(`/api/collection/prompts/${id}/attempts/remove`, {
+      hashes,
+    } satisfies UnlinkRequest),
+  draftFromFile: (file: Blob) => upload<Draft>("/api/collection/drafts/upload", file),
+  draftFromImage: (id: number) => request<Draft>(`/api/collection/drafts/from-image/${id}`, {}),
+  draftFromText: (body: TextDraftRequest) => request<Draft>("/api/collection/drafts/text", body),
+  imageCollection: (id: number) => request<ImageCollection>(`/api/collection/for-image/${id}`),
+  originalRaw: (hash: string) => request<RawOriginal>(`/api/collection/originals/${hash}/raw`),
 };
 
 export const thumbUrl = (contentHash: string) => `/thumbs/${contentHash}.webp`;
 export const fileUrl = (id: number) => `/api/images/${id}/file`;
+export const originalUrl = (hash: string) => `/api/collection/originals/${hash}`;

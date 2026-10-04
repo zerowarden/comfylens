@@ -65,7 +65,15 @@ def test_every_interface_matches_a_model_field_for_field():
 def test_mirrored_literal_unions_match():
     ts = _ts_literals(TYPES_TS.read_text("utf-8"))
     backend = _backend_literals()
-    mirror = {"Status", "SortKey", "NumericFilterField", "Bucket", "Section"}
+    mirror = {
+        "Status",
+        "SortKey",
+        "NumericFilterField",
+        "Bucket",
+        "Section",
+        "ImageRole",
+        "DraftMetadata",
+    }
     assert {name: ts[name] for name in mirror} == {name: backend[name] for name in mirror}
 
 

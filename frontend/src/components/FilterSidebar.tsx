@@ -199,6 +199,55 @@ function TextSearch() {
   );
 }
 
+/** Saved or not, and the one saved prompt "Show in library" filters to. */
+function CollectionFilter() {
+  const saved = useFilters((s) => s.filters.saved);
+  const promptId = useFilters((s) => s.filters.saved_prompt);
+  const update = useFilters((s) => s.update);
+  const prompt = useQuery({
+    queryKey: ["collection", "prompt", promptId],
+    queryFn: () => api.savedPrompt(promptId!),
+    enabled: promptId !== null,
+    retry: false,
+  });
+  return (
+    <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+      <div className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+        Collection
+      </div>
+      <Segmented
+        value={saved === null ? "any" : saved ? "saved" : "unsaved"}
+        options={[
+          { value: "any", label: "Any" },
+          { value: "saved", label: "Saved" },
+          { value: "unsaved", label: "Not saved" },
+        ]}
+        onChange={(v) => update((x) => ({ ...x, saved: v === "any" ? null : v === "saved" }))}
+      />
+      {promptId !== null && (
+        <div className="mt-2 flex items-center gap-1.5 rounded bg-sky-500/10 px-2 py-1 text-xs">
+          <Glyph name="bookmark" className="size-3 shrink-0 text-sky-600" />
+          <span
+            className="min-w-0 flex-1 truncate"
+            title="Linked to this saved prompt, or the same prompt text"
+          >
+            {prompt.data?.title ?? (prompt.isError ? "a deleted saved prompt" : "…")}
+          </span>
+          <button
+            type="button"
+            title="Clear the saved prompt filter"
+            aria-label="Clear the saved prompt filter"
+            className="hover:text-red-500"
+            onClick={() => update((x) => ({ ...x, saved_prompt: null }))}
+          >
+            <Glyph name="x" className="size-3" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function FilterSidebar() {
   const facets = useQuery({ queryKey: ["facets"], queryFn: api.facets });
   const filters = useFilters((s) => s.filters);
@@ -302,6 +351,7 @@ export default function FilterSidebar() {
           })}
         </div>
       )}
+      <CollectionFilter />
       <div className="px-3 py-2">
         <div className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
           Warnings

@@ -1,9 +1,12 @@
 import arrowLeft from "@iconify-icons/lucide/arrow-left";
 import arrowRight from "@iconify-icons/lucide/arrow-right";
+import bookmark from "@iconify-icons/lucide/bookmark";
+import bookmarkPlus from "@iconify-icons/lucide/bookmark-plus";
 import check from "@iconify-icons/lucide/check";
 import chevronRight from "@iconify-icons/lucide/chevron-right";
 import circleAlert from "@iconify-icons/lucide/circle-alert";
 import copy from "@iconify-icons/lucide/copy";
+import imagePlus from "@iconify-icons/lucide/image-plus";
 import link from "@iconify-icons/lucide/link";
 import x from "@iconify-icons/lucide/x";
 // The offline build renders bundled icon data and never fetches from the Iconify API.
@@ -15,10 +18,13 @@ import { CHAIN_SEPARATOR, type ChainKind } from "../lib/chains";
 const ICONS = {
   arrowLeft,
   arrowRight,
+  bookmark,
+  bookmarkPlus,
   check,
   chevronRight,
   circleAlert,
   copy,
+  imagePlus,
   link,
   x,
 } satisfies Record<string, IconifyIcon>;

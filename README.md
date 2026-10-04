@@ -50,6 +50,7 @@ In the UI:
 - **Rename and trash:** right-click an image in the grid or in the detail view. Rename changes the file name within its folder, keeping the extension, and never overwrites another file. Move to trash sends the files to the system trash (on Linux `~/.local/share/Trash`, or `.Trash-<uid>` at the root of another drive), where your file manager can restore them. Right-click a selected image to trash the whole selection; images hidden by filters are left alone. The grid updates at once, and the catalog is updated with the file, so no re-index is needed. These are the only actions that change files in the library.
 - **Compare:** select exactly two images and click Compare to see their settings, LoRA chains and a word-level prompt diff side by side.
 - **Distinctive terms:** with a selection, the Prompts tab shows the words and phrases that set the selection apart from the rest of the filtered images.
+- **Prompt collection:** switch to Collection in the top bar to keep prompts worth trying, each with reference images, tags, notes and a source link. Drop, pick or paste images there (PNG, JPEG or WebP; ComfyUI metadata fills in the prompt and settings), or right-click a library image and choose Save to collection. Add to saved prompt links library images to a saved prompt as attempts. Saved images carry a bookmark badge, the Collection filter in the sidebar shows saved or unsaved images, and Show in library lists a saved prompt's images: those linked to it and those whose prompt has the same text. Images are copied into the collection, so a saved prompt keeps its references when library files are renamed or trashed. The collection is shared by every library.
 - **Families:** images are grouped by model family using the `[[families]]` rules in the config. The defaults cover Qwen Image, Krea 2 (local `krea-2` and hosted `krea-2-api`), FLUX and Ideogram.
 
 State lives outside the library:
@@ -58,9 +59,10 @@ State lives outside the library:
 | --- | --- |
 | Catalog | `$XDG_DATA_HOME/comfylens/<library-id>/catalog.sqlite` |
 | Thumbnails | `$XDG_CACHE_HOME/comfylens/thumbs/` |
+| Prompt collection | `$XDG_DATA_HOME/comfylens/collection/` |
 | Config | `$XDG_CONFIG_HOME/comfylens/config.toml` |
 
-Deleting the catalog or the thumbnail directory is always safe; the next `index` rebuilds it.
+Deleting the catalog or the thumbnail directory is always safe; the next `index` rebuilds it. The prompt collection is different: it holds your saved prompts and copies of their images, and nothing can rebuild it.
 
 ## Configuration
 

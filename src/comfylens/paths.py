@@ -31,6 +31,12 @@ def lock_path(root: Path) -> Path:
     return library_dir(root) / "index.lock"
 
 
+def collection_dir() -> Path:
+    """The saved-prompt collection: shared across libraries and, unlike the catalog, not
+    rebuildable."""
+    return _xdg("XDG_DATA_HOME", ".local/share") / "comfylens" / "collection"
+
+
 def thumbs_dir() -> Path:
     """Shared across libraries: thumbnails are keyed by content hash."""
     return _xdg("XDG_CACHE_HOME", ".cache") / "comfylens" / "thumbs"

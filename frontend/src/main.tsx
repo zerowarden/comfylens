@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 
 import App from "./App";
 import "./index.css";
+import { syncViewToUrl } from "./lib/collection";
 import { syncFiltersToUrl } from "./state/filters";
 
 const queryClient = new QueryClient({
@@ -13,6 +14,7 @@ const queryClient = new QueryClient({
 });
 
 syncFiltersToUrl();
+syncViewToUrl();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

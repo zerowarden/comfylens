@@ -29,7 +29,7 @@ def stats(body: StatsRequest, request: Request) -> dict[str, Any]:
     server = server_of(request)
     snap = server.store.current
     analysis = server.config.analysis
-    resolved = resolve(snap, body, analysis, server.search)
+    resolved = resolve(snap, body, analysis, server)
     groups = compute_stats(snap, resolved, list(body.sections), body.lora_key, analysis)
     return {"scope": resolved.info, "groups": groups}
 
@@ -38,7 +38,7 @@ def stats(body: StatsRequest, request: Request) -> dict[str, Any]:
 def get_timeline(body: TimelineRequest, request: Request) -> dict[str, Any]:
     server = server_of(request)
     snap = server.store.current
-    base = filter_files(snap, body.filters, server.search, ignore_dates=True)
+    base = filter_files(snap, body.filters, server, ignore_dates=True)
     selected = snap.images.filter(pl.col("id").is_in(body.selection)) if body.selection else None
     return timeline(base, selected, body.bucket)
 
@@ -47,7 +47,7 @@ def get_timeline(body: TimelineRequest, request: Request) -> dict[str, Any]:
 def node_keys(body: Scope, request: Request) -> dict[str, Any]:
     server = server_of(request)
     snap = server.store.current
-    resolved = resolve(snap, body, server.config.analysis, server.search)
+    resolved = resolve(snap, body, server.config.analysis, server)
     return {"scope": resolved.info, "keys": input_keys(snap, resolved)}
 
 
@@ -56,7 +56,7 @@ def node_stats(body: NodeStatsRequest, request: Request) -> dict[str, Any]:
     server = server_of(request)
     snap = server.store.current
     analysis = server.config.analysis
-    resolved = resolve(snap, body, analysis, server.search)
+    resolved = resolve(snap, body, analysis, server)
     groups = input_stats(
         snap,
         resolved,

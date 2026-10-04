@@ -6,7 +6,7 @@ import type { IndexStatusModel, LibraryInfo } from "../api/types";
 import { fmtInt } from "../lib/format";
 import { indexPollInterval, runLanded } from "../lib/indexing";
 import { useUi } from "../state/ui";
-import { Button } from "./ui";
+import { Button, Segmented } from "./ui";
 
 /** Poll the indexer, and refresh all data once a run lands. */
 function useIndexStatus() {
@@ -82,6 +82,8 @@ export default function TopBar() {
   const setSidebarOpen = useUi((s) => s.setSidebarOpen);
   const panelOpen = useUi((s) => s.panelOpen);
   const setPanelOpen = useUi((s) => s.setPanelOpen);
+  const view = useUi((s) => s.view);
+  const setView = useUi((s) => s.setView);
   const [notice, setNotice] = useState<string | null>(null);
 
   const rescan = useMutation({
@@ -101,10 +103,22 @@ export default function TopBar() {
   const running = status !== undefined && status.state !== "idle";
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-zinc-200 px-3 dark:border-zinc-800">
-      <Button onClick={() => setSidebarOpen(!sidebarOpen)} title="Toggle filters">
+      <Button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        title="Toggle filters"
+        disabled={view !== "library"}
+      >
         ☰
       </Button>
       <span className="font-semibold">ComfyLens</span>
+      <Segmented
+        value={view}
+        options={[
+          { value: "library", label: "Library" },
+          { value: "collection", label: "Collection" },
+        ]}
+        onChange={setView}
+      />
       <span className="min-w-0 truncate font-mono text-xs text-zinc-500" title={library?.root}>
         {library?.root}
       </span>
@@ -138,19 +152,23 @@ export default function TopBar() {
       <Button onClick={() => rescan.mutate()} disabled={running || rescan.isPending}>
         Rescan
       </Button>
-      <Button
-        active={pool}
-        onClick={() => setPool(!pool)}
-        title="Compute one group across families"
-      >
-        Pool families
-      </Button>
+      {view === "library" && (
+        <Button
+          active={pool}
+          onClick={() => setPool(!pool)}
+          title="Compute one group across families"
+        >
+          Pool families
+        </Button>
+      )}
       <Button onClick={toggleTheme} title="Toggle theme">
         {theme === "dark" ? "Light" : "Dark"}
       </Button>
-      <Button onClick={() => setPanelOpen(!panelOpen)} title="Toggle analysis panel">
-        Analysis
-      </Button>
+      {view === "library" && (
+        <Button onClick={() => setPanelOpen(!panelOpen)} title="Toggle analysis panel">
+          Analysis
+        </Button>
+      )}
     </header>
   );
 }

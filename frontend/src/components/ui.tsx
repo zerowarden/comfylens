@@ -208,5 +208,8 @@ export function Message({ children }: { children: ReactNode }) {
   return <div className="px-3 py-6 text-center text-zinc-500">{children}</div>;
 }
 
+/** A filled action button; add a border and background color. */
+export const PRIMARY =
+  "rounded border px-2 py-0.5 text-xs font-medium text-white disabled:opacity-40";
 export const th = "px-1.5 py-1 text-left font-medium text-zinc-500";
 export const td = "px-1.5 py-1 align-top";

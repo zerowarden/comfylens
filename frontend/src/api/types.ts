@@ -6,6 +6,8 @@ export type NumericFilterField = "steps" | "cfg" | "denoise" | "guidance" | "shi
 export type Bucket = "day" | "week" | "month";
 export type Section = "numeric" | "categorical" | "seeds" | "loras" | "stacks" | "configs";
 export type GenericKind = "num" | "str" | "bool" | "json";
+export type ImageRole = "reference" | "attempt";
+export type DraftMetadata = "comfyui" | "a1111" | "none";
 
 // Scope.
 
@@ -26,6 +28,8 @@ export interface Filters {
   text: string;
   numeric: Partial<Record<NumericFilterField, [number, number]>>;
   has_warnings: boolean | null;
+  saved: boolean | null; // linked to any saved prompt (or to none)
+  saved_prompt: number | null; // one saved prompt's files: linked, or the same prompt
 }
 
 export interface Scope {
@@ -127,6 +131,7 @@ export interface ImageItem {
   status: Status;
   has_warnings: boolean;
   timestamp_suspect: boolean;
+  saved: boolean; // linked to a saved prompt in the collection
 }
 
 export interface ImagesPage {
@@ -539,4 +544,133 @@ export interface NodeStatsResponse {
   class_type: string;
   input_name: string;
   groups: NodeStatsGroup[];
+}
+
+// The saved-prompt collection.
+
+export interface SavedLora {
+  name: string;
+  strength_model: number | null;
+  strength_clip: number | null;
+}
+
+export interface PromptSettings {
+  base_model: string | null;
+  seed: string | null;
+  steps: number | null;
+  cfg: number | null;
+  sampler_name: string | null;
+  scheduler: string | null;
+  denoise: number | null;
+  guidance: number | null;
+  shift: number | null;
+  loras: SavedLora[];
+}
+
+export interface PromptInput {
+  title: string;
+  positive: string;
+  negative: string;
+  notes: string;
+  source_url: string | null;
+  model_family: string | null;
+  tags: string[];
+  settings: PromptSettings;
+  references: string[]; // content hashes of collection images, in order
+  attempts: string[]; // content hashes linked in addition to existing attempts
+}
+
+export interface CollectionImage {
+  content_hash: string;
+  role: ImageRole;
+  format: string | null; // null when the collection holds no copy
+  width: number | null;
+  height: number | null;
+  has_workflow: boolean;
+  library_ids: number[]; // files with this content hash in the served library
+}
+
+export interface PromptSummary {
+  id: number;
+  title: string;
+  positive: string;
+  model_family: string | null;
+  tags: string[];
+  cover_hash: string | null;
+  reference_count: number;
+  attempt_count: number;
+  library_count: number | null; // null while prompt analysis warms up
+  updated_at: number;
+}
+
+export interface CollectionList {
+  items: PromptSummary[];
+  tags: FacetValue[];
+  families: FacetValue[];
+}
+
+export interface SavedPrompt {
+  id: number;
+  uid: string;
+  title: string;
+  positive: string;
+  negative: string;
+  notes: string;
+  source_url: string | null;
+  model_family: string | null;
+  tags: string[];
+  settings: PromptSettings;
+  references: CollectionImage[];
+  attempts: CollectionImage[];
+  library_count: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface Draft {
+  original: CollectionImage | null;
+  title: string;
+  positive: string;
+  negative: string;
+  model_family: string | null;
+  settings: PromptSettings;
+  metadata: DraftMetadata;
+}
+
+export interface TextDraftRequest {
+  positive: string;
+  negative: string;
+}
+
+export interface LinkRequest {
+  file_ids: number[];
+}
+
+export interface LinkResponse {
+  added: number;
+  skipped: number[];
+}
+
+export interface UnlinkRequest {
+  hashes: string[];
+}
+
+export interface DeleteResponse {
+  deleted: boolean;
+}
+
+export interface PromptRef {
+  id: number;
+  title: string;
+  role: ImageRole | null;
+}
+
+export interface ImageCollection {
+  linked: PromptRef[];
+  matching: PromptRef[];
+}
+
+export interface RawOriginal {
+  prompt: unknown;
+  workflow: unknown;
 }

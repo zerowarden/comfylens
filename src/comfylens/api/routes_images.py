@@ -26,6 +26,7 @@ from comfylens.api.schemas import (
     TrashResponse,
 )
 from comfylens.api.server import ApiError, Server, same_origin, server_of
+from comfylens.collection.drafts import rebuild_thumbnail
 from comfylens.extract.normalize import aspect, megapixels
 from comfylens.paths import thumb_path, thumbs_dir
 
@@ -50,13 +51,14 @@ _ITEM_COLUMNS = [
     "status",
     "has_warnings",
     "timestamp_suspect",
+    "saved",
 ]
 _THUMB_NAME = re.compile(r"[0-9a-f]{32}\.webp")
 _MEDIA_TYPES = {"png": "image/png", "jpeg": "image/jpeg"}
 
 
 def _sorted(server: Server, query: ImagesQuery | IdsQuery) -> pl.DataFrame:
-    files = filter_files(server.store.current, query.filters, server.search)
+    files = filter_files(server.store.current, query.filters, server)
     sort: Sort = query.sort
     column = _SORT_COLUMNS[sort.key]
     # Ties are broken by id, in the same direction.
@@ -65,8 +67,14 @@ def _sorted(server: Server, query: ImagesQuery | IdsQuery) -> pl.DataFrame:
 
 @router.post("/query", response_model=ImagesPage)
 def query(body: ImagesQuery, request: Request) -> dict[str, Any]:
-    files = _sorted(server_of(request), body)
-    page = files.slice(body.offset, body.limit).select(_ITEM_COLUMNS)
+    server = server_of(request)
+    files = _sorted(server, body)
+    saved = pl.Series(sorted(server.saved_hashes()), dtype=pl.String).implode()
+    page = (
+        files.slice(body.offset, body.limit)
+        .with_columns(pl.col("content_hash").is_in(saved).alias("saved"))
+        .select(_ITEM_COLUMNS)
+    )
     return {"total": files.height, "offset": body.offset, "items": page.to_dicts()}
 
 
@@ -285,12 +293,20 @@ def original(raw_id: str, request: Request, download: bool = False) -> FileRespo
 
 
 @thumbs_router.get("/thumbs/{name}", response_model=None)
-def thumbnail(name: str) -> FileResponse:
-    """Only a 32-character lowercase hex hash is accepted; anything else is 404."""
+def thumbnail(name: str, request: Request) -> FileResponse:
+    """Only a 32-character lowercase hex hash is accepted; anything else is 404.
+
+    Index runs restore library thumbnails; a collection image's is rebuilt here, on request.
+    """
     if not _THUMB_NAME.fullmatch(name):
         raise ApiError(404, "not_found", "no such thumbnail")
-    path = thumb_path(thumbs_dir(), name.removesuffix(".webp"))
-    if not path.is_file():
+    content_hash = name.removesuffix(".webp")
+    path = thumb_path(thumbs_dir(), content_hash)
+    server = server_of(request)
+    if not path.is_file() and not (
+        server.collection is not None
+        and rebuild_thumbnail(server.collection, content_hash, server.config)
+    ):
         raise ApiError(404, "not_found", "no such thumbnail")
     return FileResponse(
         path,

@@ -1,7 +1,7 @@
 """Request and response models for every endpoint. The frontend mirrors these types."""
 
 from datetime import date
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -111,6 +111,7 @@ class ImageItem(BaseModel):
     status: Status
     has_warnings: bool
     timestamp_suspect: bool
+    saved: bool  # linked to a saved prompt in the collection
 
 
 class ImagesPage(BaseModel):
@@ -526,3 +527,143 @@ class NodeStatsResponse(BaseModel):
     class_type: str
     input_name: str
     groups: list[NodeStatsGroup]
+
+
+# The saved-prompt collection.
+
+ImageRole = Literal["reference", "attempt"]
+DraftMetadata = Literal["comfyui", "a1111", "none"]
+HASH_PATTERN = r"^[0-9a-f]{32}$"
+
+
+class SavedLora(BaseModel):
+    name: str
+    strength_model: float | None = None
+    strength_clip: float | None = None
+
+
+class PromptSettings(BaseModel):
+    """Generation settings as far as they are known; every field may be missing."""
+
+    base_model: str | None = None
+    seed: str | None = None  # up to 2**64 - 1
+    steps: int | None = None
+    cfg: float | None = None
+    sampler_name: str | None = None
+    scheduler: str | None = None
+    denoise: float | None = None
+    guidance: float | None = None
+    shift: float | None = None
+    loras: list[SavedLora] = []
+
+
+class PromptInput(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    positive: str = Field(max_length=100_000)
+    negative: str = Field("", max_length=100_000)
+    notes: str = Field("", max_length=100_000)
+    source_url: str | None = Field(None, max_length=2000)
+    model_family: str | None = Field(None, max_length=200)
+    tags: list[str] = Field([], max_length=50)
+    settings: PromptSettings = PromptSettings()
+    references: list[Annotated[str, Field(pattern=HASH_PATTERN)]] = Field([], max_length=100)
+    attempts: list[Annotated[str, Field(pattern=HASH_PATTERN)]] = Field([], max_length=TRASH_BATCH)
+
+
+class CollectionImage(BaseModel):
+    content_hash: str
+    role: ImageRole
+    format: str | None  # png, jpeg or webp; None when the collection holds no copy
+    width: int | None
+    height: int | None
+    has_workflow: bool  # the original holds a ComfyUI prompt or workflow
+    library_ids: list[int]  # files with this content hash in the served library
+
+
+class PromptSummary(BaseModel):
+    id: int
+    title: str
+    positive: str
+    model_family: str | None
+    tags: list[str]
+    cover_hash: str | None  # the first reference, else the first attempt
+    reference_count: int
+    attempt_count: int
+    library_count: int | None  # files in the served library; None while prompts warm up
+    updated_at: int
+
+
+class CollectionList(BaseModel):
+    items: list[PromptSummary]  # most recently changed first
+    tags: list[FacetValue]
+    families: list[FacetValue]
+
+
+class SavedPrompt(BaseModel):
+    id: int
+    uid: str
+    title: str
+    positive: str
+    negative: str
+    notes: str
+    source_url: str | None
+    model_family: str | None
+    tags: list[str]
+    settings: PromptSettings
+    references: list[CollectionImage]
+    attempts: list[CollectionImage]
+    library_count: int | None
+    created_at: int
+    updated_at: int
+
+
+class Draft(BaseModel):
+    """A prompt read from an image (or typed in), not saved until the user confirms it."""
+
+    original: CollectionImage | None
+    title: str
+    positive: str
+    negative: str
+    model_family: str | None
+    settings: PromptSettings
+    metadata: DraftMetadata
+
+
+class TextDraftRequest(BaseModel):
+    positive: str = Field(max_length=100_000)
+    negative: str = Field("", max_length=100_000)
+
+
+class LinkRequest(BaseModel):
+    file_ids: list[int] = Field(min_length=1, max_length=TRASH_BATCH)
+
+
+class LinkResponse(BaseModel):
+    added: int
+    skipped: list[int]  # no such file, or a file without a content hash
+
+
+class UnlinkRequest(BaseModel):
+    hashes: list[Annotated[str, Field(pattern=HASH_PATTERN)]] = Field(
+        min_length=1, max_length=TRASH_BATCH
+    )
+
+
+class DeleteResponse(BaseModel):
+    deleted: bool
+
+
+class PromptRef(BaseModel):
+    id: int
+    title: str
+    role: ImageRole | None  # None for a prompt that only shares the text
+
+
+class ImageCollection(BaseModel):
+    linked: list[PromptRef]  # saved prompts this image is linked to
+    matching: list[PromptRef]  # other saved prompts with the same positive prompt
+
+
+class RawOriginal(BaseModel):
+    prompt: Any | None
+    workflow: Any | None

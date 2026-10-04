@@ -32,7 +32,7 @@ def prompts(body: PromptsRequest, request: Request) -> dict[str, Any] | JSONResp
     frames = snap.prompts
     if frames is None:
         return _warming()
-    resolved = resolve(snap, body, server.config.analysis, server.search)
+    resolved = resolve(snap, body, server.config.analysis, server)
     groups = analyze_prompts(
         frames,
         resolved.rows.select("id", "content_hash", "group", "generated_at"),
@@ -55,9 +55,9 @@ def distinctive(body: DistinctiveRequest, request: Request) -> dict[str, Any] | 
     if frames is None:
         return _warming()
     analysis = server.config.analysis
-    chosen = resolve(snap, body, analysis, server.search)
-    filtered = resolve(snap, Scope(filters=body.filters, pool=body.pool), analysis, server.search)
-    library = resolve(snap, Scope(pool=body.pool), analysis, server.search)
+    chosen = resolve(snap, body, analysis, server)
+    filtered = resolve(snap, Scope(filters=body.filters, pool=body.pool), analysis, server)
+    library = resolve(snap, Scope(pool=body.pool), analysis, server)
     # Copies of selected images belong to neither side.
     picked = chosen.files.select("id", "content_hash")
     rest_rows = filtered.rows.filter(
