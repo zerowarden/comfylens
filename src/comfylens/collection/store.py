@@ -195,17 +195,7 @@ class CollectionStore:
     ) -> str:
         """Store an image's exact bytes; returns its content hash. Storing it again is a no-op."""
         content_hash = xxhash.xxh3_128_hexdigest(data)
-        target = self._file(content_hash, fmt)
-        if not target.is_file():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".", suffix=".tmp")
-            try:
-                with os.fdopen(fd, "wb") as f:
-                    f.write(data)
-                os.replace(tmp, target)
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+        self.write_file(content_hash, fmt, data)
         with self._connect() as conn, transaction(conn):
             # A re-upload restarts the grace period of an original no prompt uses yet.
             conn.execute(
@@ -215,6 +205,21 @@ class CollectionStore:
                 (content_hash, fmt, width, height, len(data), api_prompt, workflow, _now()),
             )
         return content_hash
+
+    def write_file(self, content_hash: str, fmt: str, data: bytes) -> None:
+        """Put an original's bytes in place, atomically; nothing to do when already there."""
+        target = self._file(content_hash, fmt)
+        if target.is_file():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp, target)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     def original(self, content_hash: str) -> dict[str, Any] | None:
         """format, width, height, size and the file path; None when unknown or missing."""
@@ -562,6 +567,119 @@ class CollectionStore:
                 " ORDER BY updated_at DESC, id DESC",
                 (key_hex(key),),
             ).fetchall()
+
+    # Export and import.
+
+    def export_rows(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Every prompt (fields, tags, images) and every original a prompt refers to, read in
+        one transaction."""
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            try:
+                cursor = conn.execute(
+                    "SELECT uid, title, positive, negative, notes, source_url, model_family,"
+                    " settings, created_at, updated_at, id FROM prompts ORDER BY id"
+                )
+                names = [d[0] for d in cursor.description]
+                prompts = [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+                tags: dict[int, list[str]] = {}
+                for prompt_id, tag in conn.execute(
+                    "SELECT prompt_id, tag FROM prompt_tags ORDER BY tag"
+                ):
+                    tags.setdefault(prompt_id, []).append(tag)
+                images: dict[int, list[dict[str, Any]]] = {}
+                for prompt_id, h, role, position in conn.execute(
+                    "SELECT prompt_id, content_hash, role, position FROM prompt_images"
+                    " ORDER BY prompt_id, role, position"
+                ):
+                    images.setdefault(prompt_id, []).append(
+                        {"content_hash": h, "role": role, "position": position}
+                    )
+                cursor = conn.execute(
+                    "SELECT content_hash, format, width, height, size, api_prompt, workflow"
+                    " FROM originals WHERE content_hash IN"
+                    " (SELECT content_hash FROM prompt_images WHERE role = 'reference')"
+                    " ORDER BY content_hash"
+                )
+                names = [d[0] for d in cursor.description]
+                originals = [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+            finally:
+                conn.execute("ROLLBACK")
+        for prompt in prompts:
+            prompt_id = prompt.pop("id")
+            prompt["settings"] = json.loads(prompt["settings"])
+            prompt["tags"] = tags.get(prompt_id, [])
+            prompt["images"] = images.get(prompt_id, [])
+        return prompts, originals
+
+    def import_rows(
+        self, prompts: list[dict[str, Any]], originals: list[dict[str, Any]]
+    ) -> tuple[int, int]:
+        """Add prompts whose uid is new, in one transaction; returns (added, skipped).
+
+        The originals' files must already be in place (`write_file`). A reference to an original
+        that is not in the collection is dropped; attempts are kept as they are.
+        """
+        now = _now()
+        added = skipped = 0
+        with self._connect() as conn, transaction(conn):
+            conn.executemany(
+                "INSERT OR IGNORE INTO originals (content_hash, format, width, height, size,"
+                " api_prompt, workflow, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        o["content_hash"],
+                        o["format"],
+                        o["width"],
+                        o["height"],
+                        o["size"],
+                        o["api_prompt"],
+                        o["workflow"],
+                        now,
+                    )
+                    for o in originals
+                ],
+            )
+            known = {r[0] for r in conn.execute("SELECT content_hash FROM originals")}
+            for p in prompts:
+                if conn.execute("SELECT 1 FROM prompts WHERE uid = ?", (p["uid"],)).fetchone():
+                    skipped += 1
+                    continue
+                data = PromptData(
+                    title=p["title"],
+                    positive=p["positive"],
+                    negative=p["negative"],
+                    notes=p["notes"],
+                    source_url=p["source_url"],
+                    model_family=p["model_family"],
+                    tags=p["tags"],
+                    settings=p["settings"],
+                )
+                clean, _, _ = self._validated(data)
+                prompt_id = conn.execute(
+                    "INSERT INTO prompts (uid, title, positive, negative, positive_key, notes,"
+                    " source_url, model_family, settings, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    (p["uid"], *self._columns(clean), p["created_at"], p["updated_at"]),
+                ).fetchone()[0]
+                images = sorted(p["images"], key=lambda i: (i["role"], i["position"]))
+                references = [
+                    i["content_hash"]
+                    for i in images
+                    if i["role"] == "reference" and i["content_hash"] in known
+                ]
+                attempts = [i["content_hash"] for i in images if i["role"] == "attempt"]
+                self._write_children(
+                    conn,
+                    prompt_id,
+                    clean.tags,
+                    _check_hashes(references),
+                    [h for h in _check_hashes(attempts) if h not in references],
+                )
+                added += 1
+            if added:
+                self._bump(conn)
+        return added, skipped
 
 
 def _now() -> int:

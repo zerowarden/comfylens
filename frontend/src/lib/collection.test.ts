@@ -10,6 +10,7 @@ import {
   emptySettings,
   fillEmptyFields,
   imageFiles,
+  importSummary,
   loraText,
   parseTags,
   promptSettingsRows,
@@ -159,5 +160,18 @@ describe("adding images in the editor", () => {
     const text = new File(["x"], "a.txt", { type: "text/plain" });
     const unknown = new File(["x"], "a.webp");
     expect(imageFiles([png, text, unknown])).toEqual([png, unknown]);
+  });
+});
+
+describe("importSummary", () => {
+  it("says what an import changed", () => {
+    expect(importSummary({ added: 3, skipped: 0, images: 4 })).toBe("Imported 3 prompts");
+    expect(importSummary({ added: 1, skipped: 2, images: 1 })).toBe(
+      "Imported 1 prompt (2 already here)",
+    );
+    expect(importSummary({ added: 0, skipped: 1, images: 0 })).toBe(
+      "Nothing new: all 1 prompt were already here",
+    );
+    expect(importSummary({ added: 0, skipped: 0, images: 0 })).toBe("The archive holds no prompts");
   });
 });

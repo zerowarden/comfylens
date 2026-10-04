@@ -12,18 +12,24 @@ from typing import Any
 
 from PIL import Image
 
+from comfylens.collection.a1111 import parse_parameters
 from comfylens.collection.store import CollectionStore, OriginalFormat
 from comfylens.config import Config
 from comfylens.extract.normalize import prompt_ws
 from comfylens.extract.pipeline import analyze
 from comfylens.extract.types import Extraction
 from comfylens.index.thumbs import make_thumbnail
+from comfylens.metadata.jpeg import decode_user_comment
 from comfylens.paths import thumb_path, thumbs_dir
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 TITLE_CHARS = 60
 _PIL_FORMATS: dict[str, OriginalFormat] = {"PNG": "png", "JPEG": "jpeg", "WEBP": "webp"}
-_FIRST_SENTENCE = re.compile(r"[^\n.!?]*")
+# Up to a sentence end (. ! ? before whitespace, so "0.8" stays whole) or a line break.
+_FIRST_SENTENCE = re.compile(r"[^\n]*?(?=[.!?]+(?:\s|$)|\n|$)")
+_NETWORK_TAG = re.compile(r"<(?:lora|lyco|hypernet):[^>]*>", re.IGNORECASE)
+_EXIF_IFD = 0x8769
+_USER_COMMENT = 0x9286
 
 
 class UnsupportedImage(ValueError):
@@ -32,7 +38,7 @@ class UnsupportedImage(ValueError):
 
 def suggest_title(positive: str) -> str:
     """The prompt's first sentence, cut at a word boundary; "Untitled" for an empty prompt."""
-    match = _FIRST_SENTENCE.match(prompt_ws(positive))
+    match = _FIRST_SENTENCE.match(prompt_ws(_NETWORK_TAG.sub("", positive)).strip())
     first = (match.group(0) if match else "").strip(" ,;:")
     if not first:
         return "Untitled"
@@ -91,7 +97,7 @@ def text_draft(positive: str, negative: str = "") -> dict[str, Any]:
     }
 
 
-def _identify(data: bytes) -> tuple[OriginalFormat, int, int]:
+def identify(data: bytes) -> tuple[OriginalFormat, int, int]:
     try:
         with Image.open(BytesIO(data)) as img:
             fmt = _PIL_FORMATS.get(img.format or "")
@@ -109,14 +115,19 @@ def build_draft(data: bytes, store: CollectionStore, config: Config) -> dict[str
 
     Raises UnsupportedImage. The original's `library_ids` is left for the caller to fill in.
     """
-    fmt, width, height = _identify(data)
+    fmt, width, height = identify(data)
     draft = text_draft("")
     api_prompt = workflow = None
-    if fmt != "webp":  # the metadata readers know PNG and JPEG only
+    a1111_texts: list[str] = []
+    if fmt == "webp":  # the metadata readers know PNG and JPEG only
+        a1111_texts = _webp_user_comment(data)
+    else:
         analysis = analyze(data, config)
         if analysis.raw is not None:
             api_prompt = analysis.raw.api_prompt
             workflow = analysis.raw.workflow
+            raw = analysis.raw
+            a1111_texts = [raw.texts[k] for k, kind in raw.kinds.items() if kind == "a1111"]
         e = analysis.extraction
         if e is not None:
             positive = e.positive_prompt or ""
@@ -128,6 +139,12 @@ def build_draft(data: bytes, store: CollectionStore, config: Config) -> dict[str
                 "settings": settings_of(e),
                 "metadata": "comfyui",
             }
+    if draft["metadata"] == "none":
+        for text in a1111_texts:
+            parsed = parse_parameters(text)
+            if parsed is not None:
+                draft |= parsed | {"title": suggest_title(parsed["positive"]), "metadata": "a1111"}
+                break
 
     content_hash = store.put_original(
         data,
@@ -149,6 +166,18 @@ def build_draft(data: bytes, store: CollectionStore, config: Config) -> dict[str
         "library_ids": [],
     }
     return draft
+
+
+def _webp_user_comment(data: bytes) -> list[str]:
+    """A WebP's Exif UserComment, where A1111 and Forge write their parameters."""
+    try:
+        with Image.open(BytesIO(data)) as img:
+            value = img.getexif().get_ifd(_EXIF_IFD).get(_USER_COMMENT)
+    except Exception:
+        return []
+    if isinstance(value, bytes):
+        value = decode_user_comment(value)
+    return [value.rstrip("\0")] if isinstance(value, str) and value.strip("\0 ") else []
 
 
 def _thumbnail(data: bytes, content_hash: str, config: Config) -> None:

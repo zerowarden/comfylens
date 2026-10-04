@@ -1,13 +1,17 @@
 """The saved-prompt collection: prompts, drafts, links to library images, and originals."""
 
 import json
+import os
 import sqlite3
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from comfylens import file_ops
@@ -18,6 +22,7 @@ from comfylens.api.schemas import (
     DeleteResponse,
     Draft,
     ImageCollection,
+    ImportResponse,
     LinkRequest,
     LinkResponse,
     PromptInput,
@@ -27,6 +32,7 @@ from comfylens.api.schemas import (
     UnlinkRequest,
 )
 from comfylens.api.server import ApiError, Server, same_origin, server_of
+from comfylens.collection.archive import InvalidArchive, export_zip, import_zip
 from comfylens.collection.drafts import (
     MAX_UPLOAD_BYTES,
     UnsupportedImage,
@@ -45,6 +51,7 @@ from comfylens.collection.store import (
 router = APIRouter(prefix="/api/collection")
 
 _MEDIA_TYPES = {"png": "image/png", "jpeg": "image/jpeg", "webp": "image/webp"}
+MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024
 
 
 def _store(server: Server) -> CollectionStore:
@@ -330,3 +337,50 @@ def original_raw(content_hash: str, request: Request) -> dict[str, Any]:
         "prompt": json.loads(prompt) if prompt else None,
         "workflow": json.loads(workflow) if workflow else None,
     }
+
+
+@router.get("/export", response_model=None)
+def export(request: Request) -> FileResponse:
+    """The whole collection as a zip download; see collection.archive."""
+    store = _store(server_of(request))
+    fd, path = tempfile.mkstemp(prefix="comfylens-export-", suffix=".zip")
+    try:
+        with os.fdopen(fd, "wb") as out, _errors():
+            export_zip(store, out)
+    except BaseException:
+        os.unlink(path)
+        raise
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=f"comfylens-collection-{date.today().isoformat()}.zip",
+        background=BackgroundTask(os.unlink, path),
+    )
+
+
+def _import(store: CollectionStore, archive: Any) -> dict[str, Any]:
+    with _errors():
+        try:
+            stats = import_zip(store, archive)
+        except InvalidArchive as e:
+            raise ApiError(400, "invalid_archive", str(e)) from e
+    return {"added": stats.added, "skipped": stats.skipped, "images": stats.images}
+
+
+@router.post("/import", response_model=ImportResponse, dependencies=[Depends(same_origin)])
+async def import_archive(request: Request) -> dict[str, Any]:
+    """The request body is an archive from /export. Prompts already here are skipped."""
+    store = _store(server_of(request))
+    too_large = ApiError(413, "too_large", f"archives up to {MAX_ARCHIVE_BYTES >> 30} GiB only")
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > MAX_ARCHIVE_BYTES:
+        raise too_large
+    with tempfile.TemporaryFile() as archive:
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_ARCHIVE_BYTES:
+                raise too_large
+            archive.write(chunk)
+        archive.seek(0)
+        return await run_in_threadpool(_import, store, archive)

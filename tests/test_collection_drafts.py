@@ -99,6 +99,9 @@ def test_rebuild_thumbnail(store: CollectionStore, config: Config):
 def test_titles():
     assert suggest_title("A fox. In snow") == "A fox"
     assert suggest_title("  \n") == "Untitled"
+    assert suggest_title("cfg 0.8 weights stay whole. Second") == "cfg 0.8 weights stay whole"
+    assert suggest_title("<lora:x:0.5> a heron, mist") == "a heron, mist"
+    assert suggest_title("first line\nsecond line") == "first line"
     long = "word " * 30
     title = suggest_title(long)
     assert title.endswith("…") and len(title) <= 61 and not title[:-1].endswith(" ")

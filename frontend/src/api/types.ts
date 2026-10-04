@@ -670,6 +670,12 @@ export interface ImageCollection {
   matching: PromptRef[];
 }
 
+export interface ImportResponse {
+  added: number; // prompts new to this collection
+  skipped: number; // prompts it already had
+  images: number; // reference images in the archive
+}
+
 export interface RawOriginal {
   prompt: unknown;
   workflow: unknown;

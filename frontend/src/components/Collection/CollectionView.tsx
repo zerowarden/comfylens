@@ -1,10 +1,10 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 
-import { api, thumbUrl } from "../../api/client";
+import { api, EXPORT_URL, thumbUrl } from "../../api/client";
 import type { PromptSummary } from "../../api/types";
 import { familyColor } from "../../lib/colors";
-import { draftFiles, emptySettings } from "../../lib/collection";
+import { draftFiles, emptySettings, imageFiles, importCollection } from "../../lib/collection";
 import { fmtInt } from "../../lib/format";
 import { useDebounced } from "../../lib/hooks";
 import { useThumbnailFailure } from "../../lib/images";
@@ -77,6 +77,8 @@ export default function CollectionView() {
   const [family, setFamily] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const archiveInput = useRef<HTMLInputElement>(null);
+  const client = useQueryClient();
   const openEditor = useCollection((s) => s.openEditor);
   const list = useQuery({
     queryKey: ["collection", "list", q, tag, family],
@@ -116,7 +118,12 @@ export default function CollectionView() {
         if (!hasFiles(e)) return;
         e.preventDefault();
         setDragging(false);
-        void draftFiles([...e.dataTransfer.files]);
+        // A dropped export is imported; images become a new prompt.
+        const files = [...e.dataTransfer.files];
+        const archives = files.filter((f) => f.name.toLowerCase().endsWith(".zip"));
+        for (const archive of archives) void importCollection(client, archive);
+        const images = imageFiles(files);
+        if (images.length > 0) void draftFiles(images);
       }}
     >
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-zinc-200 px-3 dark:border-zinc-800">
@@ -192,6 +199,32 @@ export default function CollectionView() {
             if (files.length > 0) void draftFiles(files);
           }}
         />
+        <span className="h-5 border-l border-zinc-300 dark:border-zinc-700" />
+        <a
+          href={EXPORT_URL}
+          download
+          title="Download every saved prompt and its images as one zip, as a backup or for another machine"
+          className="rounded border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+        >
+          Export
+        </a>
+        <Button
+          onClick={() => archiveInput.current?.click()}
+          title="Add the prompts of an exported zip; prompts already here are skipped"
+        >
+          Import…
+        </Button>
+        <input
+          ref={archiveInput}
+          type="file"
+          accept=".zip,application/zip"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void importCollection(client, file);
+          }}
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {list.isError && <div className="p-4 text-red-600">{list.error.message}</div>}
@@ -220,7 +253,7 @@ export default function CollectionView() {
       </div>
       {dragging && (
         <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-lg border-2 border-dashed border-sky-500 bg-sky-500/10 text-sky-700 dark:text-sky-300">
-          Drop images to save them as a prompt
+          Drop images to save them as a prompt, or an exported zip to import it
         </div>
       )}
     </div>

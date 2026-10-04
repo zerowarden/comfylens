@@ -306,3 +306,45 @@ def test_newer_collection_leaves_the_library_working(library: Path, config: Conf
         page = c.post("/api/images/query", json={}).json()
         assert page["total"] == 7 and not any(i["saved"] for i in page["items"])
         assert c.post("/api/images/query", json={"filters": {"saved": True}}).json()["total"] == 0
+
+
+def test_export_and_import(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    ids = ids_by_path(client)
+    prompt = save_from_library(client, ids["fox1.png"], tags=["fox"])
+    export = client.get("/api/collection/export")
+    assert export.status_code == 200
+    assert export.headers["content-type"] == "application/zip"
+    assert "comfylens-collection-" in export.headers["content-disposition"]
+
+    client.post(f"/api/collection/prompts/{prompt['id']}/delete", json={})
+    headers = {"Content-Type": "application/zip"}
+    first = client.post("/api/collection/import", content=export.content, headers=headers)
+    assert first.json() == {"added": 1, "skipped": 0, "images": 1}
+    restored = client.get("/api/collection/prompts").json()["items"]
+    assert [(p["title"], p["tags"]) for p in restored] == [(prompt["title"], ["fox"])]
+    assert saved_paths(client) == {"fox1.png"}
+    again = client.post("/api/collection/import", content=export.content, headers=headers)
+    assert again.json() == {"added": 0, "skipped": 1, "images": 1}
+
+    bad = client.post("/api/collection/import", content=b"nope", headers=headers)
+    assert bad.status_code == 400 and bad.json()["error"]["code"] == "invalid_archive"
+    evil = client.post("/api/collection/import", content=export.content, headers=EVIL)
+    assert evil.status_code == 403
+    monkeypatch.setattr("comfylens.api.routes_collection.MAX_ARCHIVE_BYTES", 10)
+    big = client.post("/api/collection/import", content=export.content, headers=headers)
+    assert big.status_code == 413
+
+
+def test_upload_reads_a1111_parameters(client: TestClient):
+    text = (
+        "a lighthouse at dusk <lora:moody:0.6>\nNegative prompt: text\n"
+        "Steps: 30, Sampler: Euler a, CFG scale: 5, Seed: 99"
+    )
+    draft = client.post(
+        "/api/collection/drafts/upload", content=png_with_text({"parameters": text})
+    ).json()
+    assert draft["metadata"] == "a1111"
+    assert draft["title"] == "a lighthouse at dusk"
+    assert draft["settings"]["loras"] == [
+        {"name": "moody", "strength_model": 0.6, "strength_clip": 0.6}
+    ]

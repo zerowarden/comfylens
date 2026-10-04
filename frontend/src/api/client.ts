@@ -9,6 +9,7 @@ import type {
   IdsResponse,
   ImageCollection,
   ImageDetail,
+  ImportResponse,
   ImagesPage,
   ImagesQuery,
   IndexStatusModel,
@@ -140,8 +141,10 @@ export const api = {
   draftFromText: (body: TextDraftRequest) => request<Draft>("/api/collection/drafts/text", body),
   imageCollection: (id: number) => request<ImageCollection>(`/api/collection/for-image/${id}`),
   originalRaw: (hash: string) => request<RawOriginal>(`/api/collection/originals/${hash}/raw`),
+  importCollection: (archive: Blob) => upload<ImportResponse>("/api/collection/import", archive),
 };
 
 export const thumbUrl = (contentHash: string) => `/thumbs/${contentHash}.webp`;
 export const fileUrl = (id: number) => `/api/images/${id}/file`;
 export const originalUrl = (hash: string) => `/api/collection/originals/${hash}`;
+export const EXPORT_URL = "/api/collection/export";

@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 
 from comfylens.analytics.scope import Filters, Scope
 from comfylens.analytics.timeline import Bucket
+from comfylens.collection.models import PromptSettings as PromptSettings  # mirrored too
+from comfylens.collection.models import SavedLora as SavedLora
 from comfylens.metadata.types import Status
 
 SortKey = Literal["generated_at", "rel_path", "family", "steps", "cfg"]
@@ -536,25 +538,7 @@ DraftMetadata = Literal["comfyui", "a1111", "none"]
 HASH_PATTERN = r"^[0-9a-f]{32}$"
 
 
-class SavedLora(BaseModel):
-    name: str
-    strength_model: float | None = None
-    strength_clip: float | None = None
-
-
-class PromptSettings(BaseModel):
-    """Generation settings as far as they are known; every field may be missing."""
-
-    base_model: str | None = None
-    seed: str | None = None  # up to 2**64 - 1
-    steps: int | None = None
-    cfg: float | None = None
-    sampler_name: str | None = None
-    scheduler: str | None = None
-    denoise: float | None = None
-    guidance: float | None = None
-    shift: float | None = None
-    loras: list[SavedLora] = []
+# PromptSettings and SavedLora live in collection.models: the archive reads them too.
 
 
 class PromptInput(BaseModel):
@@ -662,6 +646,12 @@ class PromptRef(BaseModel):
 class ImageCollection(BaseModel):
     linked: list[PromptRef]  # saved prompts this image is linked to
     matching: list[PromptRef]  # other saved prompts with the same positive prompt
+
+
+class ImportResponse(BaseModel):
+    added: int  # prompts new to this collection
+    skipped: int  # prompts it already had
+    images: int  # reference images in the archive
 
 
 class RawOriginal(BaseModel):

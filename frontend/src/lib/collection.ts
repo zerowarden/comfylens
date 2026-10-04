@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type {
   CollectionImage,
   Draft,
+  ImportResponse,
   PromptInput,
   PromptSettings,
   SavedLora,
@@ -275,4 +276,25 @@ export function fillEmptyFields(fields: DraftFields, drafts: Draft[]): DraftFiel
 /** Image files among dropped or pasted ones. */
 export function imageFiles(files: Iterable<File>): File[] {
   return [...files].filter((f) => f.type === "" || f.type.startsWith("image/"));
+}
+
+/** "Imported 3 prompts (2 were already here)", from an import's counts. */
+export function importSummary(r: ImportResponse): string {
+  const plural = (n: number) => `${fmtInt(n)} ${n === 1 ? "prompt" : "prompts"}`;
+  if (r.added === 0 && r.skipped === 0) return "The archive holds no prompts";
+  if (r.added === 0) return `Nothing new: all ${plural(r.skipped)} were already here`;
+  const already = r.skipped > 0 ? ` (${fmtInt(r.skipped)} already here)` : "";
+  return `Imported ${plural(r.added)}${already}`;
+}
+
+/** Add an exported archive's prompts to the collection and report what changed. */
+export async function importCollection(client: QueryClient, file: File): Promise<void> {
+  const { notify } = useFileActions.getState();
+  notify({ text: `Importing ${file.name}…`, tone: "info", sticky: true });
+  try {
+    notify({ text: importSummary(await api.importCollection(file)), tone: "info" });
+  } catch (e) {
+    notify({ text: `Could not import ${file.name}: ${errorText(e)}`, tone: "error" });
+  }
+  refreshAfterCollectionWrite(client);
 }
