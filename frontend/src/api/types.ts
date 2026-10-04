@@ -144,6 +144,32 @@ export interface IdsResponse {
   ids: number[];
 }
 
+// Renaming and trashing files.
+
+export interface RenameRequest {
+  name: string; // the new base name, extension included; the directory stays
+}
+
+export interface RenameResponse {
+  id: number;
+  rel_path: string;
+  generated_at: number;
+}
+
+export interface TrashRequest {
+  ids: number[]; // 1 to TRASH_BATCH
+}
+
+export interface TrashFailure {
+  id: number;
+  message: string;
+}
+
+export interface TrashResponse {
+  trashed: number[]; // moved to the system trash, or already gone; no longer in the catalog
+  failed: TrashFailure[];
+}
+
 export interface DetailFile {
   id: number;
   rel_path: string;

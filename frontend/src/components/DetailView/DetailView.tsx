@@ -6,6 +6,7 @@ import type { ImageDetail } from "../../api/types";
 import { settingsRows } from "../../lib/compare";
 import { fmtBytes, fmtNum } from "../../lib/format";
 import { useImageDetail, useImageOrder } from "../../lib/images";
+import { useFileActions } from "../../state/fileActions";
 import { useUi } from "../../state/ui";
 import { chainKind } from "../../lib/chains";
 import { ChainText, Glyph } from "../icons";
@@ -158,10 +159,15 @@ function Details({ id }: { id: number }) {
 
 function ImagePane({ id }: { id: number }) {
   const [actualSize, setActualSize] = useState(false);
+  const openMenu = useFileActions((s) => s.openMenu);
   return (
     <div
       className={`flex min-w-0 flex-1 bg-black ${actualSize ? "overflow-auto" : "items-center justify-center overflow-hidden"}`}
       onClick={() => setActualSize(!actualSize)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openMenu({ x: e.clientX, y: e.clientY, ids: [id] });
+      }}
       title={actualSize ? "Click to fit" : "Click for 1:1"}
     >
       <img

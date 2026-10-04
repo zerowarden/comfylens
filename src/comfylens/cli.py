@@ -168,7 +168,7 @@ def serve_library(
     if not _is_loopback(host):
         typer.echo(
             f"Warning: serving on {host}, which is not a loopback address. comfylens has no"
-            " authentication: anyone who can reach this port can see your library.",
+            " authentication: anyone who can reach this port can view, rename and trash images.",
             err=True,
         )
     url = f"http://{'localhost' if _is_loopback(host) else host}:{port}/"

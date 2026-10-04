@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import AnalysisPanel from "./components/AnalysisPanel/AnalysisPanel";
 import CompareView from "./components/CompareView/CompareView";
 import DetailView from "./components/DetailView/DetailView";
+import FileActions from "./components/FileActions";
 import FilterSidebar from "./components/FilterSidebar";
 import Grid from "./components/Grid";
 import Timeline from "./components/Timeline";
@@ -30,6 +31,7 @@ export default function App() {
       </div>
       <DetailView />
       <CompareView />
+      <FileActions />
     </div>
   );
 }

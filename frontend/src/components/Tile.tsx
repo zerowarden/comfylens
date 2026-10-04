@@ -13,15 +13,17 @@ interface TileProps {
   selected: boolean;
   onClick: (id: number, event: MouseEvent) => void;
   onOpen: (id: number) => void;
+  onContextMenu: (id: number, event: MouseEvent) => void;
 }
 
-function Tile({ id, item, size, selected, onClick, onOpen }: TileProps) {
+function Tile({ id, item, size, selected, onClick, onOpen, onContextMenu }: TileProps) {
   const [failed, onThumbnailError] = useThumbnailFailure();
   return (
     <div
       data-tile={id}
       onClick={(e) => onClick(id, e)}
       onDoubleClick={() => onOpen(id)}
+      onContextMenu={(e) => onContextMenu(id, e)}
       title={item ? `${item.rel_path}\n${fmtDateTime(item.generated_at)}` : undefined}
       className={`relative cursor-pointer overflow-hidden rounded bg-zinc-100 dark:bg-zinc-900 ${
         selected ? "outline-3 outline-sky-500" : "hover:outline-1 hover:outline-zinc-400"

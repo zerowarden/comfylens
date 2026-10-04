@@ -1,6 +1,6 @@
 # comfylens
 
-A local, read-only web app that indexes a directory of ComfyUI output images and reports the generation settings they used.
+A local web app that indexes a directory of ComfyUI output images and reports the generation settings they used. You can also rename images and move them to the trash from it.
 
 ## Quick start
 
@@ -40,13 +40,14 @@ uv run comfylens report DIR             # add --json, or --family qwen-image-2.1
 uv run comfylens inspect IMAGE.png      # one file, no catalog; add --json
 ```
 
-- **`serve`:** starts the web UI on 127.0.0.1. It serves the existing catalog at once, indexes in the background and opens a browser. Use `--no-index`, `--no-open`, `--port` and `--host` to change that. A non-loopback `--host` prints a warning, because there is no authentication. With `--watch`, new images are indexed as ComfyUI writes them; `make` turns this on by default.
+- **`serve`:** starts the web UI on 127.0.0.1. It serves the existing catalog at once, indexes in the background and opens a browser. Use `--no-index`, `--no-open`, `--port` and `--host` to change that. A non-loopback `--host` prints a warning, because there is no authentication and the UI can rename and trash files. With `--watch`, new images are indexed as ComfyUI writes them; `make` turns this on by default.
 - **`index`:** scans the library and reads new or changed files once in a process pool. It writes the catalog and WebP thumbnails, and flags bulk-copied timestamps. It never writes inside the library.
 - **`report`:** shows the parse success rate, families, reachable node classes with no handler, warnings and suspect timestamp clusters. It also prints per-family statistics, LoRAs and top configurations, plus index timing.
 - **`inspect`:** shows everything extraction finds in one file.
 
 In the UI:
 
+- **Rename and trash:** right-click an image in the grid or in the detail view. Rename changes the file name within its folder, keeping the extension, and never overwrites another file. Move to trash sends the files to the system trash (on Linux `~/.local/share/Trash`, or `.Trash-<uid>` at the root of another drive), where your file manager can restore them. Right-click a selected image to trash the whole selection; images hidden by filters are left alone. The grid updates at once, and the catalog is updated with the file, so no re-index is needed. These are the only actions that change files in the library.
 - **Compare:** select exactly two images and click Compare to see their settings, LoRA chains and a word-level prompt diff side by side.
 - **Distinctive terms:** with a selection, the Prompts tab shows the words and phrases that set the selection apart from the rest of the filtered images.
 - **Families:** images are grouped by model family using the `[[families]]` rules in the config. The defaults cover Qwen Image, Krea 2 (local `krea-2` and hosted `krea-2-api`), FLUX and Ideogram.

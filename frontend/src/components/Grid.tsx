@@ -7,14 +7,14 @@ import type { ImageItem, ImagesPage, SortKey } from "../api/types";
 import { fmtInt } from "../lib/format";
 import { useElementWidth } from "../lib/hooks";
 import { comparePair } from "../lib/compare";
-import { useImageOrder } from "../lib/images";
+import { PAGE_SIZE as PAGE, useImageOrder } from "../lib/images";
+import { useFileActions } from "../state/fileActions";
 import { SORT_KEYS, useFilters } from "../state/filters";
 import { hiddenCount, marqueeSelect, useSelection } from "../state/selection";
 import { TILE_MAX, TILE_MIN, useUi } from "../state/ui";
 import Tile from "./Tile";
 import { Button } from "./ui";
 
-const PAGE = 500;
 const PAD = 8;
 const GAP = 6;
 const DRAG_THRESHOLD = 4; // px before a press on a tile becomes a marquee instead of a click
@@ -130,6 +130,7 @@ export default function Grid() {
   const selectAllIds = useSelection((s) => s.selectAll);
   const setSelected = useSelection((s) => s.setSelected);
   const clearSelection = useSelection((s) => s.clear);
+  const openMenu = useFileActions((s) => s.openMenu);
 
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const width = useElementWidth(scroller);
@@ -184,6 +185,20 @@ export default function Grid() {
       click(id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey }, order);
     },
     [click, order],
+  );
+
+  // Right-click on a selected tile acts on every selected image the filters show; on any other
+  // tile it selects that tile first, as file managers do. The menu opens without a request.
+  const onTileContextMenu = useCallback(
+    (id: number, e: MouseEvent) => {
+      e.preventDefault();
+      const { selected: current } = useSelection.getState();
+      let ids = [id];
+      if (current.has(id)) ids = order.filter((i) => current.has(i));
+      else click(id, { ctrl: false, shift: false }, order);
+      openMenu({ x: e.clientX, y: e.clientY, ids });
+    },
+    [click, order, openMenu],
   );
 
   // Keyboard: Ctrl+A selects every filtered image, Esc clears, Enter opens the anchor.
@@ -325,6 +340,7 @@ export default function Grid() {
                     selected={selected.has(id)}
                     onClick={onTileClick}
                     onOpen={openDetail}
+                    onContextMenu={onTileContextMenu}
                   />
                 );
               })}

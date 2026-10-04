@@ -1,4 +1,4 @@
-"""Grid pages, id lists, detail, raw metadata, originals and thumbnails."""
+"""Grid pages, id lists, detail, raw metadata, originals, thumbnails, renames and trashing."""
 
 import json
 import os
@@ -7,9 +7,10 @@ import sqlite3
 from typing import Any
 
 import polars as pl
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 
+from comfylens import file_ops
 from comfylens.analytics.scope import filter_files
 from comfylens.api.schemas import (
     IdsQuery,
@@ -18,9 +19,13 @@ from comfylens.api.schemas import (
     ImagesPage,
     ImagesQuery,
     RawResponse,
+    RenameRequest,
+    RenameResponse,
     Sort,
+    TrashRequest,
+    TrashResponse,
 )
-from comfylens.api.server import ApiError, Server, server_of
+from comfylens.api.server import ApiError, Server, same_origin, server_of
 from comfylens.extract.normalize import aspect, megapixels
 from comfylens.paths import thumb_path, thumbs_dir
 
@@ -76,12 +81,38 @@ def _rows(conn: sqlite3.Connection, sql: str, *params: Any) -> list[dict[str, An
     return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
 
 
-def _file_row(conn: sqlite3.Connection, raw_id: str) -> dict[str, Any]:
+def _not_found(raw_id: str) -> ApiError:
+    return ApiError(404, "not_found", f"no image with id {raw_id!r}")
+
+
+def _parse_id(raw_id: str) -> int:
     """Ids are parsed here rather than by FastAPI: anything malformed is a plain 404."""
-    rows = _rows(conn, "SELECT * FROM files WHERE id = ?", int(raw_id)) if raw_id.isdigit() else []
+    if not raw_id.isdigit():
+        raise _not_found(raw_id)
+    return int(raw_id)
+
+
+def _file_row(conn: sqlite3.Connection, raw_id: str) -> dict[str, Any]:
+    rows = _rows(conn, "SELECT * FROM files WHERE id = ?", _parse_id(raw_id))
     if not rows:
-        raise ApiError(404, "not_found", f"no image with id {raw_id!r}")
+        raise _not_found(raw_id)
     return rows[0]
+
+
+_BUSY = "the catalog is busy with an index run; try again"
+
+
+@router.post("/trash", response_model=TrashResponse, dependencies=[Depends(same_origin)])
+def trash(body: TrashRequest, request: Request) -> dict[str, Any]:
+    """Move files to the system trash. Each file succeeds or fails on its own."""
+    try:
+        result = server_of(request).trash(body.ids)
+    except sqlite3.OperationalError as e:
+        raise ApiError(503, "catalog_busy", _BUSY) from e
+    return {
+        "trashed": result.removed,
+        "failed": [{"id": i, "message": m} for i, m in result.failed],
+    }
 
 
 @router.get("/{raw_id}", response_model=ImageDetail)
@@ -178,6 +209,29 @@ def _json(text: str) -> Any:
     return json.loads(text)
 
 
+@router.post("/{raw_id}/rename", response_model=RenameResponse, dependencies=[Depends(same_origin)])
+def rename(raw_id: str, body: RenameRequest, request: Request) -> dict[str, Any]:
+    """Give a file a new base name in its directory; never replaces another file."""
+    server = server_of(request)
+    file_id = _parse_id(raw_id)
+    try:
+        renamed = server.rename(file_id, body.name)
+    except file_ops.UnknownFile as e:
+        raise _not_found(raw_id) from e
+    except file_ops.InvalidName as e:
+        raise ApiError(400, "invalid_name", str(e)) from e
+    except file_ops.NameTaken as e:
+        raise ApiError(409, "name_taken", f"a file named {e} already exists") from e
+    except file_ops.FileMissing as e:
+        server.request_index()  # the catalog is behind the library
+        raise ApiError(404, "file_missing", "the file is no longer on disk") from e
+    except sqlite3.OperationalError as e:
+        raise ApiError(503, "catalog_busy", _BUSY) from e
+    except OSError as e:
+        raise ApiError(500, "rename_failed", e.strerror or str(e)) from e
+    return {"id": file_id, "rel_path": renamed.rel_path, "generated_at": renamed.generated_at}
+
+
 @router.get("/{raw_id}/raw", response_model=RawResponse)
 def raw(raw_id: str, request: Request) -> dict[str, Any]:
     conn = server_of(request).connect()
@@ -216,8 +270,11 @@ def original(raw_id: str, request: Request, download: bool = False) -> FileRespo
         f = _file_row(conn, raw_id)
     finally:
         conn.close()
-    path = os.path.normpath(os.path.join(server.root, f["rel_path"]))
-    if os.path.commonpath([path, server.root]) != str(server.root) or not os.path.isfile(path):
+    try:
+        path = file_ops.library_path(server.root, f["rel_path"])
+    except file_ops.FileMissing:
+        path = None
+    if path is None or not os.path.isfile(path):
         raise ApiError(404, "not_found", "the original file is missing")
     return FileResponse(
         path,

@@ -7,6 +7,7 @@ import {
   rangeBetween,
   selectAll,
   useSelection,
+  withoutIds,
   type Selection,
 } from "./selection";
 
@@ -91,5 +92,15 @@ describe("select all, marquee, hidden", () => {
     useSelection.getState().clear();
     expect(useSelection.getState().selected.size).toBe(0);
     expect(useSelection.getState().anchor).toBeNull();
+  });
+});
+
+describe("withoutIds", () => {
+  it("drops removed ids, and the anchor when it is one of them", () => {
+    const s: Selection = { selected: new Set([10, 20, 30]), anchor: 20 };
+    expect(ids(withoutIds(s, new Set([30])))).toEqual([10, 20]);
+    expect(withoutIds(s, new Set([30])).anchor).toBe(20);
+    expect(withoutIds(s, new Set([20])).anchor).toBeNull();
+    expect(withoutIds(s, new Set([99]))).toBe(s);
   });
 });

@@ -1,7 +1,7 @@
 [project]
 name = "comfylens"
 version = "0.1.0"
-description = "Local, read-only explorer for the generation settings embedded in ComfyUI output images"
+description = "Local explorer for the generation settings embedded in ComfyUI output images"
 readme = "README.md"
 authors = [
     { name = "ajw", email = "281508152+zerowarden@users.noreply.github.com" }
@@ -12,6 +12,7 @@ dependencies = [
     "pillow>=12.3.0",
     "polars>=1.44.2",
     "rich>=15.0.0",
+    "send2trash>=2.1.0",
     "typer>=0.27.2",
     "uvicorn>=0.54.0",
     "watchfiles>=1.3.0",

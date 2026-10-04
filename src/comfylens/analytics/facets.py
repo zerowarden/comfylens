@@ -16,7 +16,10 @@ def _counts(values: pl.Series) -> list[dict[str, Any]]:
 
 
 def facets(snap: Snapshot) -> dict[str, Any]:
-    cached = snap.facets_cache.get("facets")
+    # Read the cache before the frames: an edit patches the frames, then replaces the cache, so
+    # a result computed from frames older than this cache can only land in a discarded one.
+    cache = snap.facets_cache
+    cached = cache.get("facets")
     if cached is not None:
         return cached  # type: ignore[return-value]
     images = snap.images
@@ -37,5 +40,5 @@ def facets(snap: Snapshot) -> dict[str, Any]:
             name: {"min": gens[name].min(), "max": gens[name].max()} for name in RANGE_FIELDS
         },
     }
-    snap.facets_cache["facets"] = result
+    cache["facets"] = result
     return result

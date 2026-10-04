@@ -1,12 +1,11 @@
 import shutil
 import sqlite3
 import threading
-import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from conftest import golden_png, png_with_text, wait_for, write_file
+from conftest import golden_png, ids_by_path, png_with_text, server_of, wait_for, write_file
 from fastapi.testclient import TestClient
 from graph_builder import basic_txt2img
 
@@ -36,14 +35,7 @@ def flux(seed: int, prompt: str, lora: float | None = None) -> bytes:
 write = write_file
 
 
-@pytest.fixture(autouse=True)
-def _utc(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    # Day buckets use the local time zone; pin it so the expected dates hold everywhere.
-    monkeypatch.setenv("TZ", "UTC")
-    time.tzset()
-    yield
-    monkeypatch.undo()
-    time.tzset()
+pytestmark = pytest.mark.usefixtures("utc")
 
 
 @pytest.fixture
@@ -66,11 +58,6 @@ def client(library: Path, config: Config) -> Iterator[TestClient]:
     with TestClient(app) as c:
         wait_for(lambda: c.get("/api/library").json()["prompts_ready"])
         yield c
-
-
-def ids_by_path(client: TestClient) -> dict[str, int]:
-    items = client.post("/api/images/query", json={"limit": 100}).json()["items"]
-    return {i["rel_path"]: i["id"] for i in items}
 
 
 def test_library(client: TestClient, library: Path):
@@ -218,7 +205,7 @@ def test_prompts(client: TestClient):
 
 
 def test_prompts_warming(client: TestClient):
-    snap = client.app.state.server.store.current  # type: ignore[attr-defined]
+    snap = server_of(client).store.current
     frames, snap.prompts = snap.prompts, None
     try:
         r = client.post("/api/prompts", json={})
@@ -372,7 +359,7 @@ def test_unknown_host_header_is_rejected(client: TestClient):
 
 
 def test_rescan_picks_up_a_new_file(client: TestClient, library: Path):
-    server = client.app.state.server  # type: ignore[attr-defined]
+    server = server_of(client)
     write(library, "new.png", flux(9, "a brand new fox"), T0 + 5 * DAY)
     assert client.post("/api/index/rescan").status_code == 202
     wait_for(lambda: server.last_finished_at is not None and not server.indexing)
@@ -386,7 +373,7 @@ def test_rescan_picks_up_a_new_file(client: TestClient, library: Path):
 
 
 def test_rescan_restores_missing_thumbnails(client: TestClient):
-    server = client.app.state.server  # type: ignore[attr-defined]
+    server = server_of(client)
     items = client.post("/api/images/query", json={"limit": 100}).json()["items"]
     urls = {f"/thumbs/{i['content_hash']}.webp" for i in items}
     shutil.rmtree(thumbs_dir())
@@ -400,7 +387,7 @@ def test_rescan_restores_missing_thumbnails(client: TestClient):
 def test_status_stays_busy_until_the_new_snapshot_is_served(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ):
-    server = client.app.state.server  # type: ignore[attr-defined]
+    server = server_of(client)
     started, release = threading.Event(), threading.Event()
     rebuild = server.store.rebuild
 
@@ -421,7 +408,7 @@ def test_status_stays_busy_until_the_new_snapshot_is_served(
 
 
 def test_rescan_while_running_is_409(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    server = client.app.state.server  # type: ignore[attr-defined]
+    server = server_of(client)
     release = threading.Event()
     monkeypatch.setattr(server.indexer, "run", lambda **_: release.wait(5))
     assert client.post("/api/index/rescan").status_code == 202
@@ -432,7 +419,7 @@ def test_rescan_while_running_is_409(client: TestClient, monkeypatch: pytest.Mon
 
 
 def test_index_failure_is_reported(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    server = client.app.state.server  # type: ignore[attr-defined]
+    server = server_of(client)
 
     def locked(**_kwargs):
         raise RuntimeError("another process (pid 1) is indexing this library")
@@ -444,7 +431,7 @@ def test_index_failure_is_reported(client: TestClient, monkeypatch: pytest.Monke
 
 
 def test_snapshot_rebuild_failure_is_reported(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    server = client.app.state.server  # type: ignore[attr-defined]
+    server = server_of(client)
 
     def broken(**_kwargs):
         raise RuntimeError("snapshot boom")
@@ -464,7 +451,7 @@ def test_serving_never_writes_to_the_library(library: Path, config: Config):
 
     before = snapshot()
     with TestClient(create_app(library, config, index_on_start=True, web_dir=None)) as c:
-        server = c.app.state.server  # type: ignore[attr-defined]
+        server = server_of(c)
         wait_for(lambda: server.last_finished_at is not None)
         for path in ("/api/library", "/api/facets"):
             c.get(path)
@@ -520,7 +507,7 @@ def test_distinctive_terms(client: TestClient):
 
 
 def test_distinctive_terms_warming(client: TestClient):
-    snap = client.app.state.server.store.current  # type: ignore[attr-defined]
+    snap = server_of(client).store.current
     frames, snap.prompts = snap.prompts, None
     try:
         r = client.post("/api/prompts/distinctive", json={"selection": [1]})

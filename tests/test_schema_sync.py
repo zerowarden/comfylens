@@ -69,6 +69,14 @@ def test_mirrored_literal_unions_match():
     assert {name: ts[name] for name in mirror} == {name: backend[name] for name in mirror}
 
 
+def test_trash_batch_matches_the_frontend():
+    # A smaller server limit would turn every large trash from the UI into 400 errors.
+    files_ts = (ROOT / "frontend/src/lib/files.ts").read_text("utf-8")
+    match = re.search(r"export const TRASH_BATCH = (\d+);", files_ts)
+    assert match is not None
+    assert int(match.group(1)) == schemas.TRASH_BATCH
+
+
 def test_sampler_stage_fields_stay_in_sync():
     # The dataclass, the API model and the table carry the same fields; the column for
     # `index` is `stage_index`.

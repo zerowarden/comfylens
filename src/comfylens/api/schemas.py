@@ -128,6 +128,35 @@ class IdsResponse(BaseModel):
     ids: list[int]
 
 
+# Renaming and trashing files.
+
+TRASH_BATCH = 500  # ids per trash request; the frontend splits larger selections
+
+
+class RenameRequest(BaseModel):
+    name: str  # the new base name, extension included; the directory stays
+
+
+class RenameResponse(BaseModel):
+    id: int
+    rel_path: str
+    generated_at: int
+
+
+class TrashRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=TRASH_BATCH)
+
+
+class TrashFailure(BaseModel):
+    id: int
+    message: str
+
+
+class TrashResponse(BaseModel):
+    trashed: list[int]  # moved to the system trash, or already gone; no longer in the catalog
+    failed: list[TrashFailure]
+
+
 class DetailFile(BaseModel):
     id: int
     rel_path: str

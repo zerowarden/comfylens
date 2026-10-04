@@ -11,15 +11,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from comfylens.api import routes_images, routes_index, routes_library, routes_prompts, routes_stats
-from comfylens.api.server import ApiError, Server, error_response
+from comfylens.api.server import ALLOWED_HOSTS, ApiError, Server, error_response
 from comfylens.config import Config
 from comfylens.index.watch import DEBOUNCE_MS
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
-
-# Only these Host headers are served: without the check, a malicious page could reach the
-# loopback server through DNS rebinding. "testserver" is Starlette's TestClient default.
-ALLOWED_HOSTS = ("localhost", "127.0.0.1", "testserver")
 
 
 def create_app(

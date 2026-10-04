@@ -15,11 +15,15 @@ import type {
   PromptsRequest,
   PromptsResponse,
   RawResponse,
+  RenameRequest,
+  RenameResponse,
   Scope,
   StatsRequest,
   StatsResponse,
   TimelineRequest,
   TimelineResponse,
+  TrashRequest,
+  TrashResponse,
 } from "./types";
 
 export class ApiError extends Error {
@@ -74,6 +78,10 @@ export const api = {
   ids: (q: IdsQuery) => request<IdsResponse>("/api/images/ids", q),
   image: (id: number) => request<ImageDetail>(`/api/images/${id}`),
   raw: (id: number) => request<RawResponse>(`/api/images/${id}/raw`),
+  rename: (id: number, name: string) =>
+    request<RenameResponse>(`/api/images/${id}/rename`, { name } satisfies RenameRequest),
+  trash: (ids: number[]) =>
+    request<TrashResponse>("/api/images/trash", { ids } satisfies TrashRequest),
   stats: (q: StatsRequest) => request<StatsResponse>("/api/stats", q),
   timeline: (q: TimelineRequest) => request<TimelineResponse>("/api/timeline", q),
   prompts: (q: PromptsRequest) => request<PromptsResponse>("/api/prompts", q),

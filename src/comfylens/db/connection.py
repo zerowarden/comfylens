@@ -1,4 +1,8 @@
-"""One writer connection, owned by the indexer thread; every reader opens its own connection."""
+"""One writer connection, owned by the indexer thread; every reader opens its own connection.
+
+Renames and trashes from the UI write through short-lived connections of their own, one small
+transaction each; SQLite serializes them with the indexer's.
+"""
 
 import sqlite3
 from collections.abc import Iterator
@@ -14,9 +18,10 @@ class CatalogMissing(FileNotFoundError):
     """No usable catalog exists for this library."""
 
 
-def connect(path: Path) -> sqlite3.Connection:
-    """A writer connection in autocommit mode; use `transaction` for writes."""
-    conn = sqlite3.connect(path, autocommit=True, check_same_thread=False)
+def connect(path: Path, *, timeout: float = 5.0) -> sqlite3.Connection:
+    """A writer connection in autocommit mode; use `transaction` for writes. `timeout` is how
+    long a write waits for another connection's transaction."""
+    conn = sqlite3.connect(path, autocommit=True, check_same_thread=False, timeout=timeout)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA synchronous=NORMAL")

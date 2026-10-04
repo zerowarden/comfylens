@@ -1,1 +1,1 @@
-"""comfylens: a local, read-only explorer for settings embedded in ComfyUI images."""
+"""comfylens: a local explorer for settings embedded in ComfyUI images."""

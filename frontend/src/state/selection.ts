@@ -58,6 +58,15 @@ export function marqueeSelect(
   return additive ? new Set([...base, ...covered]) : new Set(covered);
 }
 
+/** The selection without `gone` (e.g. trashed images); the anchor goes too if it is among them. */
+export function withoutIds(current: Selection, gone: ReadonlySet<number>): Selection {
+  const anchor = current.anchor !== null && gone.has(current.anchor) ? null : current.anchor;
+  const selected = new Set([...current.selected].filter((id) => !gone.has(id)));
+  return selected.size === current.selected.size && anchor === current.anchor
+    ? current
+    : { selected, anchor };
+}
+
 /** Selected ids that the current filters hide. */
 export function hiddenCount(selected: ReadonlySet<number>, visible: ReadonlySet<number>): number {
   let hidden = 0;
@@ -69,6 +78,7 @@ interface SelectionStore extends Selection {
   click: (id: number, mods: Modifiers, order: readonly number[]) => void;
   selectAll: (order: readonly number[]) => void;
   setSelected: (selected: ReadonlySet<number>) => void;
+  remove: (gone: ReadonlySet<number>) => void;
   clear: () => void;
 }
 
@@ -78,5 +88,6 @@ export const useSelection = create<SelectionStore>((set) => ({
   click: (id, mods, order) => set((s) => clickSelect(s, id, mods, order)),
   selectAll: (order) => set((s) => selectAll(s, order)),
   setSelected: (selected) => set({ selected }),
+  remove: (gone) => set((s) => withoutIds(s, gone)),
   clear: () => set({ selected: new Set<number>(), anchor: null }),
 }));

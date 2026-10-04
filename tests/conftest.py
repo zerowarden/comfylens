@@ -1,17 +1,21 @@
 import io
 import json
 import os
+import shutil
 import struct
 import time
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
+from comfylens import file_ops
+from comfylens.api.server import Server
 from comfylens.config import Config, build_config
 
 GOLDEN = Path(__file__).parent / "fixtures" / "golden"
@@ -27,6 +31,40 @@ def _isolated_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.Temp
     # Tests never touch the developer's own config, catalogs or thumbnail cache.
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
         monkeypatch.setenv(var, str(tmp_path_factory.mktemp(var.lower())))
+
+
+@pytest.fixture(autouse=True)
+def trash_dir(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Where trashed files go. send2trash reads XDG_DATA_HOME once, at import, so it is replaced
+    outright: no test may ever move a file into the developer's own trash."""
+    trash = tmp_path_factory.mktemp("trash")
+
+    def fake_send2trash(path: str) -> None:
+        shutil.move(path, trash / f"{len(os.listdir(trash))}-{os.path.basename(path)}")
+
+    monkeypatch.setattr(file_ops, "send2trash", fake_send2trash)
+    return trash
+
+
+@pytest.fixture
+def utc(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Day buckets and filename timestamps use the local time zone; pin it so expected dates
+    hold everywhere."""
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def server_of(client: TestClient) -> Server:
+    return client.app.state.server  # type: ignore[attr-defined]
+
+
+def ids_by_path(client: TestClient) -> dict[str, int]:
+    """Catalog ids by relative path, as the grid lists them."""
+    items = client.post("/api/images/query", json={"limit": 100}).json()["items"]
+    return {i["rel_path"]: i["id"] for i in items}
 
 
 def png_with_text(texts: dict[str, Any], size: tuple[int, int] = (32, 32)) -> bytes:

@@ -3,19 +3,29 @@
 import sqlite3
 import threading
 import time
+from functools import partial
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from comfylens.analytics.snapshot import SnapshotStore
+from comfylens import file_ops
+from comfylens.analytics.snapshot import Snapshot, SnapshotStore, apply_removal, apply_rename
 from comfylens.config import Config
-from comfylens.db.connection import CatalogMissing, connect_readonly
+from comfylens.db.connection import CatalogMissing, connect, connect_readonly
 from comfylens.index.indexer import Indexer
 from comfylens.index.watch import DEBOUNCE_MS, LibraryWatcher
 from comfylens.paths import catalog_path
 
 _SEARCH_CACHE = 64
+# An edit waits this long for the indexer's current transaction (an FTS rebuild of a large
+# library takes seconds) before it gives up as busy.
+_EDIT_BUSY_TIMEOUT = 30.0
+
+# Only these Host headers are served: without the check, a malicious page could reach the
+# loopback server through DNS rebinding. "testserver" is Starlette's TestClient default.
+ALLOWED_HOSTS = ("localhost", "127.0.0.1", "testserver")
 
 
 class ApiError(Exception):
@@ -42,6 +52,8 @@ class Server:
         self._pending = False  # another run was requested while one was running
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        # Edits run one at a time, so the snapshot sees them in the order the catalog did.
+        self._edits = threading.Lock()
         self._search: dict[tuple[float, str], set[int]] = {}
 
     @property
@@ -102,6 +114,55 @@ class Server:
                 self._thread = None
                 return
 
+    def rename(self, file_id: int, name: str) -> file_ops.Renamed:
+        """Rename a file on disk, in the catalog and in the served snapshot.
+
+        Raises what file_ops.rename_file raises, or sqlite3.OperationalError when busy.
+        """
+        with self._edits:
+            conn = self._edit_connection()
+            try:
+                renamed = file_ops.rename_file(self.root, conn, self.config, file_id, name)
+            finally:
+                conn.close()
+
+            def patch(snap: Snapshot) -> None:
+                if renamed.replaced is not None:
+                    apply_removal(snap, [renamed.replaced])
+                apply_rename(snap, file_id, renamed.rel_path, renamed.generated_at)
+
+            self.store.patch(patch)
+        self._index_again_if_running()
+        return renamed
+
+    def trash(self, ids: list[int]) -> file_ops.Trashed:
+        """Move files to the system trash and drop them from the catalog and the snapshot."""
+        with self._edits:
+            conn = self._edit_connection()
+            try:
+                trashed = file_ops.trash_files(self.root, conn, ids)
+            except sqlite3.Error:
+                self.request_index()  # some files may be gone already: let a run catch up
+                raise
+            finally:
+                conn.close()
+            if trashed.removed:
+                self.store.patch(partial(apply_removal, ids=trashed.removed))
+        self._index_again_if_running()
+        return trashed
+
+    def _edit_connection(self) -> sqlite3.Connection:
+        if not self.catalog.is_file():
+            raise ApiError(503, "no_catalog", "the library has not been indexed yet")
+        return connect(self.catalog, timeout=_EDIT_BUSY_TIMEOUT)
+
+    def _index_again_if_running(self) -> None:
+        """A run in progress may have scanned the library before the edit; queue another so
+        nothing it wrote from that older view outlives it."""
+        with self._lock:
+            if self.indexing:
+                self._pending = True
+
     def connect(self) -> sqlite3.Connection:
         try:
             return connect_readonly(self.catalog)
@@ -144,3 +205,14 @@ class Server:
 
 def server_of(request: Request) -> Server:
     return request.app.state.server
+
+
+def same_origin(request: Request) -> None:
+    """Refuse a library-changing request that another site's page sent.
+
+    Browsers already stop such JSON requests behind a CORS preflight this server never
+    answers; this check does not depend on that.
+    """
+    origin = request.headers.get("origin")
+    if origin is not None and urlsplit(origin).hostname not in ALLOWED_HOSTS:
+        raise ApiError(403, "cross_origin", "requests from other sites cannot change the library")

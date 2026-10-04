@@ -1,4 +1,5 @@
-"""Catalog writes. Called only from the indexer thread, inside transactions."""
+"""Catalog writes. Called from the indexer thread, inside transactions; file_ops reuses
+`delete_files`."""
 
 import json
 import sqlite3

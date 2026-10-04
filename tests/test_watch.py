@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 import watchfiles
-from conftest import txt2img_png, wait_for
+from conftest import server_of, txt2img_png, wait_for
 from fastapi.testclient import TestClient
 
 from comfylens.api.app import create_app
@@ -43,7 +43,7 @@ def test_renamed_folder_is_indexed_without_a_rescan(tmp_path: Path, config: Conf
     (root / "before" / "a.png").write_bytes(fox(1))
     app = create_app(root, config, watch=True, watch_debounce_ms=100, web_dir=None)
     with TestClient(app) as c:
-        server = c.app.state.server  # type: ignore[attr-defined]
+        server = server_of(c)
 
         def paths() -> list[str]:
             items = c.post("/api/images/query", json={}).json()["items"]
@@ -60,7 +60,7 @@ def test_new_and_deleted_files_are_indexed_without_a_rescan(tmp_path: Path, conf
     (root / "first.png").write_bytes(fox(1))
     app = create_app(root, config, watch=True, watch_debounce_ms=100, web_dir=None)
     with TestClient(app) as c:
-        server = c.app.state.server  # type: ignore[attr-defined]
+        server = server_of(c)
 
         def total() -> int:
             return c.get("/api/library").json()["total"]
@@ -86,7 +86,7 @@ def test_a_change_during_a_run_queues_one_more_run(
     root.mkdir()
     app = create_app(root, config, index_on_start=False, web_dir=None)
     with TestClient(app) as c:
-        server = c.app.state.server  # type: ignore[attr-defined]
+        server = server_of(c)
         runs, release = [], threading.Event()
 
         def slow_run(**_kwargs):
@@ -111,6 +111,6 @@ def test_watching_never_writes_to_the_library(tmp_path: Path, config: Config):
     before = sorted((p.name, p.stat().st_mtime_ns) for p in root.iterdir())
     app = create_app(root, config, watch=True, watch_debounce_ms=100, web_dir=None)
     with TestClient(app) as c:
-        server = c.app.state.server  # type: ignore[attr-defined]
+        server = server_of(c)
         wait_for(lambda: server.last_finished_at is not None and not server.indexing)
     assert sorted((p.name, p.stat().st_mtime_ns) for p in root.iterdir()) == before
