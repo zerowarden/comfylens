@@ -1,6 +1,6 @@
 import type { StatsResponse } from "../../api/types";
 import { fmtInt } from "../../lib/format";
-import { td } from "../ui";
+import { Heading, td } from "../ui";
 import CategoricalTable from "./Categorical";
 import FamilySections from "./FamilySections";
 import { NumericTable } from "./Numeric";
@@ -16,18 +16,12 @@ export default function Resolution({ data }: { data: StatsResponse }) {
           {group.categorical?.aspect_label && (
             <CategoricalTable title="Aspect" data={group.categorical.aspect_label} />
           )}
-          {group.numeric && (
-            <NumericTable
-              stats={Object.fromEntries(
-                ["megapixels", "width", "height", "aspect"]
-                  .filter((f) => group.numeric?.[f])
-                  .map((f) => [f, group.numeric![f]!]),
-              )}
-            />
+          {group.numeric?.megapixels && (
+            <NumericTable stats={{ megapixels: group.numeric.megapixels }} />
           )}
           {group.seeds && (
             <div className="mt-3 text-xs">
-              <div className="mb-0.5 font-semibold text-zinc-500">Seeds</div>
+              <Heading>Seeds</Heading>
               <div>
                 {fmtInt(group.seeds.n_unique)} unique of {fmtInt(group.seeds.n)} images with a seed
               </div>

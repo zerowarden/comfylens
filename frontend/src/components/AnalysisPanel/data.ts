@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import type { PromptSide, Section } from "../../api/types";
 import { useScope } from "../../lib/scope";
+import { loadingText } from "../../lib/format";
 
 const ALL: Section[] = ["numeric", "categorical", "seeds", "loras", "stacks", "configs"];
 
@@ -18,14 +19,24 @@ export function useStats(loraKey: "name" | "base_name" = "name", enabled = true)
   });
 }
 
+export const isWarming = (error: Error | null) => error instanceof ApiError && error.warming;
+
 const warmingRetry = {
   // 503 {"warming": true} until prompt frames are built: retry every 2 s.
-  retry: (count: number, error: Error) => (error instanceof ApiError && error.warming) || count < 1,
-  retryDelay: (_count: number, error: Error) =>
-    error instanceof ApiError && error.warming ? 2000 : 1000,
+  retry: (count: number, error: Error) => isWarming(error) || count < 1,
+  retryDelay: (_count: number, error: Error) => (isWarming(error) ? 2000 : 1000),
 };
 
-export const isWarming = (error: Error | null) => error instanceof ApiError && error.warming;
+export const WARMING_TEXT = "Prompt analysis is warming up…";
+
+/** The note a prompt-analysis query shows in place of its result; `loaded` once it has data. */
+export function promptStatus<Loaded extends string | null>(
+  query: { failureReason: Error | null; error: Error | null; data: unknown },
+  loaded: Loaded,
+): string | Loaded {
+  if (isWarming(query.failureReason)) return WARMING_TEXT;
+  return query.data !== undefined && !query.error ? loaded : loadingText(query.error);
+}
 
 /** Prompt analysis for the current scope; the Overview and Prompts tabs share its cache. */
 export function usePrompts(

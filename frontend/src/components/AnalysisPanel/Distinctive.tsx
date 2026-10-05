@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { DistinctiveGroup, DistinctiveTerm } from "../../api/types";
 import { fmtPct } from "../../lib/format";
 import { useFilters } from "../../state/filters";
-import { FilterLink, Segmented } from "../ui";
+import { FilterLink, Heading, Segmented } from "../ui";
 
 /** |z| at or above this is unlikely by chance (two-sided 5%). */
 const NOTABLE_Z = 1.96;
@@ -36,9 +36,9 @@ function Column({
   const top = Math.max(...terms.map((t) => Math.abs(t.z)), NOTABLE_Z);
   return (
     <div className="min-w-0">
-      <div className="mb-0.5 text-xs font-semibold text-zinc-500">{title}</div>
+      <Heading>{title}</Heading>
       {terms.length === 0 ? (
-        <div className="text-xs text-zinc-500">none</div>
+        <div className="text-xs text-muted">none</div>
       ) : (
         <ul className="space-y-1 text-xs">
           {shown.map((t) => {
@@ -56,13 +56,13 @@ function Column({
                   {t.term}
                 </FilterLink>
                 <div className="flex items-center gap-1.5">
-                  <div className="h-1.5 flex-1 rounded bg-zinc-200 dark:bg-zinc-800">
+                  <div className="h-1.5 flex-1 rounded bg-track">
                     <div
-                      className={`h-1.5 rounded ${tone === "selection" ? "bg-sky-500" : "bg-amber-500"}`}
+                      className={`h-1.5 rounded ${tone === "selection" ? "bg-accent" : "bg-warning"}`}
                       style={{ width: `${Math.min(100, (Math.abs(t.z) / top) * 100)}%` }}
                     />
                   </div>
-                  <span className="shrink-0 text-zinc-500 tabular-nums">
+                  <span className="shrink-0 text-muted tabular-nums">
                     {fmtPct(t.selection_share)} vs {fmtPct(t.rest_share)}
                   </span>
                 </div>
@@ -75,7 +75,7 @@ function Column({
         <button
           type="button"
           onClick={() => setAll(!all)}
-          className="mt-1 text-xs text-sky-600 hover:underline dark:text-sky-400"
+          className="mt-1 text-xs text-link hover:underline"
         >
           {all ? "Show fewer" : `Show all ${terms.length}`}
         </button>
@@ -95,31 +95,26 @@ export default function Distinctive({
 }) {
   const [kind, setKind] = useState<Kind>("unigrams");
   return (
-    <div className="mb-4 rounded border border-zinc-200 p-2 dark:border-zinc-800">
+    <div className="mb-4 rounded border border-line p-2">
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold">Distinctive terms</span>
-        <span
-          className="cursor-help text-xs text-zinc-500 underline decoration-dotted"
-          title={LEGEND}
-        >
+        <span className="cursor-help text-xs text-muted underline decoration-dotted" title={LEGEND}>
           what is this?
         </span>
         <span className="flex-1" />
         <Segmented value={kind} options={KINDS} onChange={setKind} />
       </div>
       {!group ? (
-        <div className="text-xs text-zinc-500">{status}</div>
+        <div className="text-xs text-muted">{status}</div>
       ) : group.rest_images === 0 ? (
-        <div className="text-xs text-zinc-500">
+        <div className="text-xs text-muted">
           Every filtered image of this family is selected: there is nothing to compare against.
         </div>
       ) : group.selection_images === 0 ? (
-        <div className="text-xs text-zinc-500">
-          The selected images have no prompt on this side.
-        </div>
+        <div className="text-xs text-muted">The selected images have no prompt on this side.</div>
       ) : (
         <>
-          <div className="mb-1.5 text-xs text-zinc-500">
+          <div className="mb-1.5 text-xs text-muted">
             {group.selection_images} selected vs {group.rest_images} other filtered images
           </div>
           <div className="grid grid-cols-2 gap-3">

@@ -10,11 +10,11 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Column, Table
 
-from comfylens import version
 from comfylens.analytics.scope import NO_LOOKUP, Scope, resolve
 from comfylens.analytics.snapshot import Snapshot, snapshot_from_conn
 from comfylens.analytics.stats import compute_stats
 from comfylens.config import Config
+from comfylens.db.connection import is_stale
 from comfylens.extract.family import UNKNOWN
 from comfylens.extract.registry import unregistered
 from comfylens.warn import INFORMATIONAL_CODES
@@ -35,8 +35,7 @@ def build_report(
         "library": {
             "root": meta.get("library_root"),
             "last_index_at": _int(meta.get("last_index_at")),
-            "stale": meta.get("extractor_version") != str(version.EXTRACTOR_VERSION)
-            or meta.get("config_hash") != config.config_hash,
+            "stale": is_stale(conn, config.config_hash),
         },
         "files": _files(snap.images),
         "families": _families(gens),

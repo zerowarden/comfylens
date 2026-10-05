@@ -18,6 +18,8 @@ from comfylens.config import PromptsConfig
 from comfylens.extract.normalize import prompt_ws
 
 Side = Literal["positive", "negative"]
+# Whether each image counts once, or each distinct prompt does.
+By = Literal["image", "unique_prompt"]
 NGRAM_KINDS = ("1g", "2g", "3g")
 TOP_TERMS = 50
 TOP_DISTINCT = 50
@@ -123,7 +125,7 @@ def analyze_prompts(
     side: Side,
     *,
     include_template: bool,
-    by: Literal["image", "unique_prompt"],
+    by: By,
     config: PromptsConfig,
 ) -> list[dict[str, Any]]:
     """One block per group of `scope`: columns id, content_hash, group, generated_at.
@@ -147,7 +149,7 @@ def with_keys(frames: PromptFrames, scope: pl.DataFrame, side: Side) -> pl.DataF
     ).filter(pl.col("key").is_not_null())
 
 
-def document_weight(by: Literal["image", "unique_prompt"]) -> pl.Expr:
+def document_weight(by: By) -> pl.Expr:
     """A `count` column's document frequency: images, or 1 per distinct prompt."""
     return pl.col("count") if by == "image" else pl.lit(1, pl.UInt32)
 
@@ -171,7 +173,7 @@ def _group(
     keyed: pl.DataFrame,
     group: str,
     include_template: bool,
-    by: Literal["image", "unique_prompt"],
+    by: By,
     config: PromptsConfig,
 ) -> dict[str, Any]:
     per_key = keyed.group_by("key").agg(

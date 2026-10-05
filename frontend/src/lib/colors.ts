@@ -1,21 +1,11 @@
-// A fixed categorical palette; a family keeps its colour across the grid, timeline and panel.
-const PALETTE = [
-  "#4e79a7",
-  "#f28e2b",
-  "#59a14f",
-  "#e15759",
-  "#b07aa1",
-  "#76b7b2",
-  "#edc948",
-  "#ff9da7",
-  "#9c755f",
-  "#bab0ac",
-];
+// A family keeps its colour across the grid, timeline and panel. The colours themselves are the
+// --family-* tokens in theme.css; this only picks which one a family gets.
+const FAMILY_COLORS = 10; // --family-0 … --family-9
 export const NO_METADATA = "(no metadata)";
 
 export function familyColor(family: string | null | undefined): string {
-  if (!family || family === NO_METADATA) return "#6b7280";
+  if (!family || family === NO_METADATA) return "var(--family-none)";
   let hash = 0;
   for (let i = 0; i < family.length; i++) hash = (hash * 31 + family.charCodeAt(i)) >>> 0;
-  return PALETTE[hash % PALETTE.length] ?? "#6b7280";
+  return `var(--family-${hash % FAMILY_COLORS})`;
 }

@@ -25,16 +25,15 @@ import {
 import { useCollection, type Editor } from "../../state/collection";
 import { useFileActions } from "../../state/fileActions";
 import { useUi } from "../../state/ui";
-import { Modal } from "../FileActions";
+import { Modal } from "../Modals";
 import { Glyph } from "../icons";
-import { Button, PRIMARY } from "../ui";
+import { Button, FOCUS_FIELD, PRIMARY } from "../ui";
 
-const FIELD =
-  "mt-1 block w-full rounded border border-zinc-300 bg-transparent px-2 py-1 text-sm text-zinc-900 outline-none focus:border-sky-500 dark:border-zinc-700 dark:text-zinc-100";
+const FIELD = `mt-1 block w-full px-2 py-1 text-sm ${FOCUS_FIELD}`;
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block text-xs text-zinc-500">
+    <label className="block text-xs text-muted">
       {label}
       {children}
     </label>
@@ -60,7 +59,7 @@ function ImagesField({
   onRemove: (hash: string) => void;
   onPick: () => void;
 }) {
-  const ring = dragging ? "border-sky-500 bg-sky-500/10" : "border-zinc-300 dark:border-zinc-700";
+  const ring = dragging ? "border-accent bg-accent/10" : "border-control";
   return (
     <div className={`rounded border border-dashed p-2 ${ring}`}>
       {/* The add tile comes first: new images appear after it and nothing moves. */}
@@ -69,7 +68,7 @@ function ImagesField({
           type="button"
           onClick={onPick}
           title="Add reference images"
-          className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded border border-zinc-300 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded border border-control text-xs text-muted hover:bg-hover"
         >
           <Glyph name="imagePlus" className="size-5" />
           Add image
@@ -79,14 +78,14 @@ function ImagesField({
             <img
               src={thumbUrl(image.content_hash)}
               alt=""
-              className="h-20 w-20 rounded bg-zinc-100 object-contain dark:bg-zinc-800"
+              className="h-20 w-20 rounded bg-subtle object-contain"
             />
             <button
               type="button"
               title="Remove this reference image"
               aria-label="Remove this reference image"
               onClick={() => onRemove(image.content_hash)}
-              className="absolute top-0.5 right-0.5 rounded bg-black/60 p-0.5 text-white opacity-0 group-hover:opacity-100 focus:opacity-100"
+              className="absolute top-0.5 right-0.5 rounded bg-overlay/60 p-0.5 text-on-overlay opacity-0 group-hover:opacity-100 focus:opacity-100"
             >
               <Glyph name="x" className="size-3" />
             </button>
@@ -95,7 +94,7 @@ function ImagesField({
         {Array.from({ length: adding }, (_, i) => (
           <div
             key={`adding-${i}`}
-            className="flex h-20 w-20 animate-pulse items-center justify-center rounded bg-zinc-100 text-xs text-zinc-500 dark:bg-zinc-800"
+            className="flex h-20 w-20 animate-pulse items-center justify-center rounded bg-subtle text-xs text-muted"
           >
             Adding…
           </div>
@@ -103,11 +102,11 @@ function ImagesField({
       </div>
       {/* One line either way: a wrapped note would push the fields below it down. */}
       {note ? (
-        <p className="mt-1 truncate text-xs text-amber-700 dark:text-amber-400" title={note}>
+        <p className="mt-1 truncate text-xs text-warning" title={note}>
           {note}
         </p>
       ) : (
-        <p className="mt-1 truncate text-xs text-zinc-500">
+        <p className="mt-1 truncate text-xs text-muted">
           Paste an image (Ctrl+V), drop files here, or click Add image. PNG, JPEG or WebP.
         </p>
       )}
@@ -350,19 +349,15 @@ function EditorForm({ editor }: { editor: Editor }) {
           />
         </Field>
         {(settings.length > 0 || loras.length > 0) && (
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-muted">
             Settings from the image:{" "}
             {[...settings.map((r) => `${r.label} ${r.value}`), ...loras].join(" · ")}
           </p>
         )}
-        {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button onClick={close}>Cancel</Button>
-          <button
-            type="submit"
-            disabled={saving || adding > 0}
-            className={`${PRIMARY} border-sky-600 bg-sky-600 hover:bg-sky-700`}
-          >
+          <button type="submit" disabled={saving || adding > 0} className={PRIMARY}>
             {editor.mode === "new" ? "Save" : "Save changes"}
           </button>
         </div>

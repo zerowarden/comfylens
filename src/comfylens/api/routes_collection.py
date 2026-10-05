@@ -1,10 +1,9 @@
 """The saved-prompt collection: prompts, drafts, links to library images, and originals."""
 
-import json
 import os
 import sqlite3
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date
 from typing import Any
@@ -31,8 +30,18 @@ from comfylens.api.schemas import (
     TextDraftRequest,
     UnlinkRequest,
 )
-from comfylens.api.server import ApiError, Server, same_origin, server_of
-from comfylens.collection.archive import InvalidArchive, export_zip, import_zip
+from comfylens.api.server import (
+    IMMUTABLE,
+    MEDIA_TYPES,
+    ApiError,
+    Server,
+    not_found,
+    parse_id,
+    same_origin,
+    server_of,
+    stored_json,
+)
+from comfylens.collection.archive import InvalidArchive, export_filename, export_zip, import_zip
 from comfylens.collection.drafts import (
     MAX_UPLOAD_BYTES,
     UnsupportedImage,
@@ -50,7 +59,6 @@ from comfylens.collection.store import (
 
 router = APIRouter(prefix="/api/collection")
 
-_MEDIA_TYPES = {"png": "image/png", "jpeg": "image/jpeg", "webp": "image/webp"}
 MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024
 
 
@@ -77,15 +85,12 @@ def _errors() -> Iterator[None]:
         raise ApiError(503, "collection_busy", "the collection is busy; try again") from e
 
 
-def _id(raw_id: str, what: str = "saved prompt") -> int:
-    """Ids are parsed here rather than by FastAPI: anything malformed is a plain 404."""
-    if not raw_id.isdigit():
-        raise ApiError(404, "not_found", f"no {what} with id {raw_id!r}")
-    return int(raw_id)
+def _id(raw_id: str) -> int:
+    return parse_id(raw_id, "saved prompt")
 
 
 def _not_found(prompt_id: int) -> ApiError:
-    return ApiError(404, "not_found", f"no saved prompt with id {prompt_id}")
+    return not_found("saved prompt", prompt_id)
 
 
 def _saved_prompt(server: Server, store: CollectionStore, prompt_id: int) -> dict[str, Any]:
@@ -105,6 +110,21 @@ def _saved_prompt(server: Server, store: CollectionStore, prompt_id: int) -> dic
         "attempts": [i for i in images if i["role"] == "attempt"],
         "library_count": None if counts is None else counts[prompt_id],
     }
+
+
+async def _receive(
+    request: Request, limit: int, too_large: ApiError, write: Callable[[bytes], object]
+) -> None:
+    """Stream the request body into `write`, refusing it once it passes `limit` bytes."""
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > limit:
+        raise too_large
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise too_large
+        write(chunk)
 
 
 def _data(body: PromptInput) -> PromptData:
@@ -179,16 +199,13 @@ def link_attempts(raw_id: str, body: LinkRequest, request: Request) -> dict[str,
     store = _store(server)
     prompt_id = _id(raw_id)
     wanted = list(dict.fromkeys(body.file_ids))
-    conn = server.connect()
-    try:
+    with server.reading() as conn:
         found = dict(
             conn.execute(
                 f"SELECT id, content_hash FROM files WHERE id IN ({','.join('?' * len(wanted))})",
                 wanted,
             ).fetchall()
         )
-    finally:
-        conn.close()
     hashes = [found[i] for i in wanted if found.get(i)]
     skipped = [i for i in wanted if not found.get(i)]
     with _errors():
@@ -232,14 +249,8 @@ async def upload(request: Request) -> dict[str, Any]:
     server = server_of(request)
     store = _store(server)
     too_large = ApiError(413, "too_large", f"images up to {MAX_UPLOAD_BYTES >> 20} MiB only")
-    length = request.headers.get("content-length", "")
-    if length.isdigit() and int(length) > MAX_UPLOAD_BYTES:
-        raise too_large
     data = bytearray()
-    async for chunk in request.stream():
-        data += chunk
-        if len(data) > MAX_UPLOAD_BYTES:
-            raise too_large
+    await _receive(request, MAX_UPLOAD_BYTES, too_large, data.extend)
     return await run_in_threadpool(_draft, server, store, bytes(data))
 
 
@@ -250,20 +261,16 @@ def draft_from_image(raw_id: str, request: Request) -> dict[str, Any]:
     """A draft from a library image: its bytes are copied into the collection."""
     server = server_of(request)
     store = _store(server)
-    file_id = _id(raw_id, "image")
-    conn = server.connect()
-    try:
+    file_id = parse_id(raw_id, "image")
+    with server.reading() as conn:
         row = conn.execute("SELECT rel_path FROM files WHERE id = ?", (file_id,)).fetchone()
-    finally:
-        conn.close()
     if row is None:
-        raise ApiError(404, "not_found", f"no image with id {raw_id!r}")
+        raise not_found("image", raw_id)
     try:
         with open(file_ops.library_path(server.root, row[0]), "rb") as f:
             data = f.read()
     except (file_ops.FileMissing, FileNotFoundError) as e:
-        server.request_index()  # the catalog is behind the library
-        raise ApiError(404, "file_missing", "the file is no longer on disk") from e
+        raise server.file_gone() from e
     return _draft(server, store, data)
 
 
@@ -277,18 +284,15 @@ def for_image(raw_id: str, request: Request) -> dict[str, Any]:
     """Saved prompts a library image is linked to, and those with the same positive prompt."""
     server = server_of(request)
     store = _store(server)
-    file_id = _id(raw_id, "image")
-    conn = server.connect()
-    try:
+    file_id = parse_id(raw_id, "image")
+    with server.reading() as conn:
         row = conn.execute(
             "SELECT f.content_hash, g.positive_prompt FROM files f"
             " LEFT JOIN generations g ON g.file_id = f.id WHERE f.id = ?",
             (file_id,),
         ).fetchone()
-    finally:
-        conn.close()
     if row is None:
-        raise ApiError(404, "not_found", f"no image with id {raw_id!r}")
+        raise not_found("image", raw_id)
     content_hash, positive = row
     key = prompt_key(positive)
     with _errors():
@@ -318,10 +322,10 @@ def original_file(content_hash: str, request: Request, download: bool = False) -
     original = _original(server_of(request), content_hash)
     return FileResponse(
         original["path"],
-        media_type=_MEDIA_TYPES[original["format"]],
+        media_type=MEDIA_TYPES[original["format"]],
         filename=f"{content_hash}.{EXTENSIONS[original['format']]}",
         content_disposition_type="attachment" if download else "inline",
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        headers=IMMUTABLE,
     )
 
 
@@ -332,11 +336,7 @@ def original_raw(content_hash: str, request: Request) -> dict[str, Any]:
     with _errors():
         texts = _store(server).original_metadata(content_hash)
     prompt, workflow = texts or (None, None)
-    return {
-        # stdlib json accepts NaN; Pydantic then serializes it as null.
-        "prompt": json.loads(prompt) if prompt else None,
-        "workflow": json.loads(workflow) if workflow else None,
-    }
+    return {"prompt": stored_json(prompt), "workflow": stored_json(workflow)}
 
 
 @router.get("/export", response_model=None)
@@ -353,7 +353,7 @@ def export(request: Request) -> FileResponse:
     return FileResponse(
         path,
         media_type="application/zip",
-        filename=f"comfylens-collection-{date.today().isoformat()}.zip",
+        filename=export_filename(date.today()),
         background=BackgroundTask(os.unlink, path),
     )
 
@@ -372,15 +372,7 @@ async def import_archive(request: Request) -> dict[str, Any]:
     """The request body is an archive from /export. Prompts already here are skipped."""
     store = _store(server_of(request))
     too_large = ApiError(413, "too_large", f"archives up to {MAX_ARCHIVE_BYTES >> 30} GiB only")
-    length = request.headers.get("content-length", "")
-    if length.isdigit() and int(length) > MAX_ARCHIVE_BYTES:
-        raise too_large
     with tempfile.TemporaryFile() as archive:
-        size = 0
-        async for chunk in request.stream():
-            size += len(chunk)
-            if size > MAX_ARCHIVE_BYTES:
-                raise too_large
-            archive.write(chunk)
+        await _receive(request, MAX_ARCHIVE_BYTES, too_large, archive.write)
         archive.seek(0)
         return await run_in_threadpool(_import, store, archive)

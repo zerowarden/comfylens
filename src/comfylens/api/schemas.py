@@ -1,19 +1,23 @@
 """Request and response models for every endpoint. The frontend mirrors these types."""
 
 from datetime import date
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import BaseModel, Field
 
+from comfylens.analytics.loras import LoraKey
+from comfylens.analytics.prompts import By, Side
 from comfylens.analytics.scope import Filters, Scope
 from comfylens.analytics.timeline import Bucket
 from comfylens.collection.models import PromptSettings as PromptSettings  # mirrored too
 from comfylens.collection.models import SavedLora as SavedLora
+from comfylens.collection.store import HASH_RE
+from comfylens.extract.types import GenericKind
 from comfylens.metadata.types import Status
 
 SortKey = Literal["generated_at", "rel_path", "family", "steps", "cfg"]
 Section = Literal["numeric", "categorical", "seeds", "loras", "stacks", "configs"]
-ALL_SECTIONS: list[Section] = ["numeric", "categorical", "seeds", "loras", "stacks", "configs"]
+ALL_SECTIONS: list[Section] = list(get_args(Section))
 
 
 # Filters, LoraFilter and Scope live in analytics.scope, where they are read.
@@ -355,7 +359,7 @@ class ConfigRow(BaseModel):
 
 
 class FamilyStats(BaseModel):
-    family: str  # or "all" when pooled
+    family: str
     images: int
     numeric: dict[str, NumericStats] | None = None
     categorical: dict[str, Categorical] | None = None
@@ -367,7 +371,7 @@ class FamilyStats(BaseModel):
 
 class StatsRequest(Scope):
     sections: list[Section] = ALL_SECTIONS
-    lora_key: Literal["name", "base_name"] = "name"
+    lora_key: LoraKey = "name"
 
 
 class StatsResponse(BaseModel):
@@ -390,9 +394,9 @@ class TimelineResponse(BaseModel):
 
 
 class PromptsRequest(Scope):
-    side: Literal["positive", "negative"] = "positive"
+    side: Side = "positive"
     include_template: bool = False
-    by: Literal["image", "unique_prompt"] = "image"
+    by: By = "image"
 
 
 class TermRow(BaseModel):
@@ -433,7 +437,7 @@ class PromptGroup(BaseModel):
 
 class PromptsResponse(BaseModel):
     scope: ScopeInfo
-    side: Literal["positive", "negative"]
+    side: Side
     groups: list[PromptGroup]
 
 
@@ -441,8 +445,8 @@ class DistinctiveRequest(Scope):
     """The selection is compared with the rest of the filtered set (filters without dates are
     applied as usual). A non-empty selection is required."""
 
-    side: Literal["positive", "negative"] = "positive"
-    by: Literal["image", "unique_prompt"] = "image"
+    side: Side = "positive"
+    by: By = "image"
 
 
 class DistinctiveTerm(BaseModel):
@@ -471,14 +475,14 @@ class DistinctiveGroup(BaseModel):
 
 class DistinctiveResponse(BaseModel):
     scope: ScopeInfo  # of the selection
-    side: Literal["positive", "negative"]
+    side: Side
     groups: list[DistinctiveGroup]  # families present in the selection, largest first
 
 
 class NodeInputKey(BaseModel):
     class_type: str
     input_name: str
-    kind: Literal["num", "str", "bool", "json"]
+    kind: GenericKind
     files: int
 
 
@@ -495,7 +499,7 @@ class NodeStatsRequest(Scope):
 class NodeStatsGroup(BaseModel):
     family: str
     files: int
-    kind: Literal["num", "str", "bool", "json"]
+    kind: GenericKind
     numeric: NumericStats | None = None
     categorical: Categorical | None = None
     n_unique: int | None = None  # strings longer than 200 characters report only this
@@ -510,7 +514,7 @@ class NodeStatsResponse(BaseModel):
 
 ImageRole = Literal["reference", "attempt"]
 DraftMetadata = Literal["comfyui", "a1111", "none"]
-HASH_PATTERN = r"^[0-9a-f]{32}$"
+HASH_PATTERN = f"^{HASH_RE}$"
 
 
 # PromptSettings and SavedLora live in collection.models: the archive reads them too.

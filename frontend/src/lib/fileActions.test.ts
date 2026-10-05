@@ -8,7 +8,7 @@ import { useFilters } from "../state/filters";
 import { useSelection } from "../state/selection";
 import { useUi } from "../state/ui";
 import { imageItem } from "../test/fixtures";
-import { renameImage, trashImages } from "./fileActions";
+import { exportStripped, renameImage, trashImages } from "./fileActions";
 import { TRASH_BATCH } from "./files";
 import { orderKey } from "./images";
 
@@ -46,7 +46,42 @@ beforeEach(() => {
   useFileActions.setState({ notice: null });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe("exportStripped", () => {
+  it("saves the copy under the server's name", async () => {
+    const blob = new Blob(["png"], { type: "image/png" });
+    vi.spyOn(api, "stripped").mockResolvedValue({ blob, name: "4.png" });
+    const createObjectURL = vi.fn(() => "blob:copy");
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    await exportStripped(client, 4);
+    expect(api.stripped).toHaveBeenCalledWith(4);
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    const link = click.mock.contexts[0] as HTMLAnchorElement;
+    expect(link.href).toBe("blob:copy");
+    expect(link.download).toBe("4.png");
+    expect(useFileActions.getState().notice).toEqual({
+      text: "Exported 4.png without metadata",
+      tone: "info",
+    });
+  });
+
+  it("reports a failure with the cached name", async () => {
+    vi.spyOn(api, "stripped").mockRejectedValue(
+      new ApiError(422, "cannot_strip", "the PNG ends inside a chunk"),
+    );
+    await exportStripped(client, 4);
+    expect(useFileActions.getState().notice).toEqual({
+      text: "Could not export 4.png: the PNG ends inside a chunk",
+      tone: "error",
+    });
+  });
+});
 
 describe("trashImages", () => {
   it("hides the images before the server answers", async () => {

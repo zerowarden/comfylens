@@ -50,6 +50,7 @@ const IMAGE_ITEM = [
   "status",
   "has_warnings",
   "timestamp_suspect",
+  "saved",
 ];
 
 describe.skipIf(!base)("live API contract", () => {
@@ -59,7 +60,7 @@ describe.skipIf(!base)("live API contract", () => {
   });
   afterAll(() => vi.unstubAllGlobals());
 
-  const all: Scope = { selection: [], filters: emptyFilters(), pool: false };
+  const all: Scope = { selection: [], filters: emptyFilters() };
 
   it("library, status and facets", async () => {
     const library = await api.library();
@@ -187,13 +188,12 @@ describe.skipIf(!base)("live API contract", () => {
     expect((await realFetch(`${base}/thumbs/not-a-hash.webp`)).status).toBe(404);
   });
 
-  it("stats for all, a selection, filters and pooled", async () => {
+  it("stats for all, a selection and filters", async () => {
     const { ids } = await api.ids({ filters: emptyFilters(), sort: defaultSort() });
     const scopes: Scope[] = [
       all,
       { ...all, selection: ids.slice(0, 37) },
       { ...all, filters: { ...emptyFilters(), samplers: ["euler"] } },
-      { ...all, pool: true },
     ];
     for (const scope of scopes) {
       const stats = await api.stats({
@@ -236,13 +236,6 @@ describe.skipIf(!base)("live API contract", () => {
       (await api.stats({ ...scopes[1]!, sections: ["numeric"], lora_key: "name" })).scope
         .scope_kind,
     ).toBe("selection");
-    const pooled = await api.stats({
-      ...all,
-      pool: true,
-      sections: ["categorical"],
-      lora_key: "name",
-    });
-    expect(pooled.groups.map((g) => g.family)).toEqual(["all"]);
     const byBase = await api.stats({
       ...all,
       sections: ["loras", "stacks"],

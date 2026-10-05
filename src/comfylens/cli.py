@@ -20,12 +20,12 @@ from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeRemainingColumn
 from rich.table import Column, Table
 
-from comfylens.collection.archive import InvalidArchive, export_zip, import_zip
+from comfylens.collection.archive import InvalidArchive, export_filename, export_zip, import_zip
 from comfylens.collection.store import CollectionStore, CollectionUnavailable
 from comfylens.config import Config, ConfigError, load_config
 from comfylens.db.connection import CatalogMissing, connect_readonly
 from comfylens.extract.keys import CHAIN_SEPARATOR
-from comfylens.extract.normalize import aspect, megapixels
+from comfylens.extract.normalize import size_facts
 from comfylens.extract.pipeline import Analysis, analyze
 from comfylens.extract.registry import unregistered
 from comfylens.extract.types import Extraction
@@ -284,14 +284,11 @@ def to_dict(a: Analysis, output_classes: frozenset[str]) -> dict[str, Any]:
     }
     if a.raw is not None:
         raw = a.raw
-        ratio, label = aspect(raw.width, raw.height)
         doc["file"] = {
             "format": raw.format,
             "width": raw.width,
             "height": raw.height,
-            "megapixels": megapixels(raw.width, raw.height),
-            "aspect": ratio,
-            "aspect_label": label,
+            **size_facts(raw.width, raw.height),
         }
         doc["raw_keys"] = [
             {"key": k, "source": raw.sources[k], "kind": raw.kinds[k], "chars": len(v)}
@@ -335,10 +332,10 @@ def _print(console: Console, path: Path, a: Analysis, output_classes: frozenset[
     raw = a.raw
     if raw is None:
         return
-    ratio, label = aspect(raw.width, raw.height)
+    size = size_facts(raw.width, raw.height)
     console.print(
         f"{raw.format.upper()} {raw.width}×{raw.height}, "
-        f"{megapixels(raw.width, raw.height)} MP, aspect {ratio} ({label})"
+        f"{size['megapixels']} MP, aspect {size['aspect']} ({size['aspect_label']})"
     )
 
     keys = _table("key", "source", "kind", "chars", title="Raw keys")
@@ -538,7 +535,7 @@ def export_collection(
     """Write every saved prompt and its images to one zip, the same as Export in the UI."""
     path = target or Path.cwd()
     if path.is_dir():
-        path = path / f"comfylens-collection-{date.today().isoformat()}.zip"
+        path = path / export_filename(date.today())
     if path.exists() and not force:
         typer.echo(f"error: {path} exists; pass --force to replace it", err=True)
         raise typer.Exit(1)

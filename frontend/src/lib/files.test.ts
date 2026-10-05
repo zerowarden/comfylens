@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ImagesPage } from "../api/types";
 import { imageItem } from "../test/fixtures";
 import {
+  attachmentName,
   baseName,
   chunks,
   extension,
@@ -19,6 +20,21 @@ const page = (offset: number, ids: number[]): ImagesPage => ({
   items: ids.map((id) => imageItem(id)),
 });
 const itemIds = (p: ImagesPage | undefined) => p?.items.map((i) => i.id);
+
+describe("attachmentName", () => {
+  it("reads the plain and the escaped form", () => {
+    expect(attachmentName('attachment; filename="fox1.png"')).toBe("fox1.png");
+    expect(attachmentName("attachment; filename*=utf-8''a%20%22fox%22%20%C3%A9.png")).toBe(
+      'a "fox" é.png',
+    );
+  });
+
+  it("is null without a usable name", () => {
+    expect(attachmentName("")).toBeNull();
+    expect(attachmentName("attachment")).toBeNull();
+    expect(attachmentName("attachment; filename*=utf-8''%E0%A4%A")).toBeNull();
+  });
+});
 
 describe("names", () => {
   it("splits paths and extensions", () => {

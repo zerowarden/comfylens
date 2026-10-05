@@ -8,6 +8,8 @@ import circleAlert from "@iconify-icons/lucide/circle-alert";
 import copy from "@iconify-icons/lucide/copy";
 import imagePlus from "@iconify-icons/lucide/image-plus";
 import link from "@iconify-icons/lucide/link";
+import moon from "@iconify-icons/lucide/moon";
+import sun from "@iconify-icons/lucide/sun";
 import x from "@iconify-icons/lucide/x";
 // The offline build renders bundled icon data and never fetches from the Iconify API.
 import { Icon, type IconifyIcon } from "@iconify/react/offline";
@@ -26,6 +28,8 @@ const ICONS = {
   copy,
   imagePlus,
   link,
+  moon,
+  sun,
   x,
 } satisfies Record<string, IconifyIcon>;
 
@@ -62,13 +66,9 @@ export function ChainText({ text, kind }: { text: string; kind: ChainKind }) {
         <Fragment key={i}>
           {i > 0 &&
             (kind === "lora" ? (
-              <Glyph
-                name="link"
-                label="then"
-                className="mx-1 size-3 align-[-0.125em] text-zinc-500"
-              />
+              <Glyph name="link" label="then" className="mx-1 size-3 align-[-0.125em] text-muted" />
             ) : (
-              <span className="text-zinc-500"> + </span>
+              <span className="text-muted"> + </span>
             ))}
           {part}
         </Fragment>

@@ -14,12 +14,12 @@ import {
   type Calendar,
   type Day,
 } from "../lib/calendar";
-import { familyColor } from "../lib/colors";
 import { fmtInt } from "../lib/format";
 import { useElementWidth } from "../lib/hooks";
 import { useScope } from "../lib/scope";
 import { ChainText } from "./icons";
 import { useFilters } from "../state/filters";
+import { FamilyDot } from "./ui";
 
 const HEIGHT = 120;
 const TOP = 18; // month labels
@@ -32,13 +32,13 @@ const WEEKDAYS: [number, string][] = [
   [2, "Wed"],
   [4, "Fri"],
 ];
-// One sequential hue, light to dark; dark mode runs dark to light against its surface.
+// The heat scale from theme.css, empty to busiest.
 const LEVELS = [
-  { fill: "fill-zinc-200/70 dark:fill-zinc-800/70", bg: "bg-zinc-200/70 dark:bg-zinc-800/70" },
-  { fill: "fill-sky-200 dark:fill-sky-900", bg: "bg-sky-200 dark:bg-sky-900" },
-  { fill: "fill-sky-300 dark:fill-sky-700", bg: "bg-sky-300 dark:bg-sky-700" },
-  { fill: "fill-sky-500 dark:fill-sky-500", bg: "bg-sky-500 dark:bg-sky-500" },
-  { fill: "fill-sky-700 dark:fill-sky-300", bg: "bg-sky-700 dark:bg-sky-300" },
+  { fill: "fill-heat-0", bg: "bg-heat-0" },
+  { fill: "fill-heat-1", bg: "bg-heat-1" },
+  { fill: "fill-heat-2", bg: "bg-heat-2" },
+  { fill: "fill-heat-3", bg: "bg-heat-3" },
+  { fill: "fill-heat-4", bg: "bg-heat-4" },
 ];
 
 interface Drag {
@@ -51,7 +51,7 @@ function Tooltip({ day, left, top, flip }: { day: Day; left: number; top: number
   const rest = day.families.length - shown.length;
   return (
     <div
-      className="pointer-events-none absolute z-20 rounded border border-zinc-200 bg-white px-2 py-1.5 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+      className="pointer-events-none absolute z-20 rounded border border-control bg-surface px-2 py-1.5 text-xs shadow-lg"
       style={{
         top,
         width: TOOLTIP,
@@ -63,23 +63,18 @@ function Tooltip({ day, left, top, flip }: { day: Day; left: number; top: number
         <span className="tabular-nums">{fmtInt(day.total)}</span>
       </div>
       {shown.map(([family, n]) => (
-        <div key={family} className="flex items-center gap-1.5 text-zinc-500">
-          <span
-            className="inline-block h-2 w-2 shrink-0 rounded-full"
-            style={{ background: familyColor(family) }}
-          />
+        <div key={family} className="flex items-center gap-1.5 text-muted">
+          <FamilyDot family={family} />
           <span className="min-w-0 flex-1 truncate">
             <ChainText text={family} kind="pipeline" />
           </span>
           <span className="tabular-nums">{fmtInt(n)}</span>
         </div>
       ))}
-      {rest > 0 && <div className="text-zinc-500">+{rest} more families</div>}
+      {rest > 0 && <div className="text-muted">+{rest} more families</div>}
       {day.selected > 0 && <div className="mt-0.5">{fmtInt(day.selected)} selected</div>}
       {day.suspect > 0 && (
-        <div className="text-amber-600 dark:text-amber-400">
-          {fmtInt(day.suspect)} with suspect timestamps
-        </div>
+        <div className="text-warning">{fmtInt(day.suspect)} with suspect timestamps</div>
       )}
     </div>
   );
@@ -133,7 +128,7 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
                 rx={round}
                 fill="none"
                 strokeWidth={1.5}
-                className="stroke-zinc-900 dark:stroke-zinc-100"
+                className="stroke-fg"
               />
             )}
           </g>
@@ -155,7 +150,7 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
           rx={round}
           fill="none"
           strokeWidth={1}
-          className="stroke-zinc-300/60 dark:stroke-zinc-700/60"
+          className="stroke-control/60"
         />
       )),
     [calendar, pitch, size, round],
@@ -242,11 +237,11 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
             patternUnits="userSpaceOnUse"
             patternTransform="rotate(45)"
           >
-            <line x1="0" y1="0" x2="0" y2="3" strokeWidth="1.2" className="stroke-amber-500" />
+            <line x1="0" y1="0" x2="0" y2="3" strokeWidth="1.2" className="stroke-warning" />
           </pattern>
         </defs>
         {labels.map(({ x, label }) => (
-          <text key={x} x={x} y={TOP - 6} fontSize={10} className="fill-zinc-500">
+          <text key={x} x={x} y={TOP - 6} fontSize={10} className="fill-muted">
             {label}
           </text>
         ))}
@@ -259,7 +254,7 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
               fontSize={9}
               textAnchor="end"
               dominantBaseline="middle"
-              className="fill-zinc-500"
+              className="fill-muted"
             >
               {label}
             </text>
@@ -283,7 +278,7 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
             rx={round}
             fill="none"
             strokeWidth={1}
-            className="pointer-events-none stroke-zinc-500"
+            className="pointer-events-none stroke-muted"
           />
         )}
       </svg>
@@ -296,7 +291,7 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
         />
       )}
       {filtered && (
-        <div className="pointer-events-none absolute top-0.5 right-3 bg-white px-1 text-xs text-zinc-500 tabular-nums dark:bg-zinc-950">
+        <div className="pointer-events-none absolute top-0.5 right-3 bg-canvas px-1 text-xs text-muted tabular-nums">
           {from ?? "…"} – {to ?? "…"}
         </div>
       )}
@@ -320,13 +315,13 @@ export default function Timeline() {
   return (
     <div
       ref={setElement}
-      className="relative shrink-0 border-b border-zinc-200 dark:border-zinc-800"
+      className="relative shrink-0 border-b border-line"
       style={{ height: HEIGHT }}
     >
       {calendar && calendar.days.length > 0 && width > 0 ? (
         <Heatmap calendar={calendar} width={width} />
       ) : (
-        <div className="flex h-full items-center justify-center text-zinc-500">
+        <div className="flex h-full items-center justify-center text-muted">
           {query.isError ? query.error.message : calendar ? "No dated images" : "Loading timeline…"}
         </div>
       )}

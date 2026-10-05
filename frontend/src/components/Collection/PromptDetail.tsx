@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { api, originalUrl, thumbUrl } from "../../api/client";
+import { api, originalUrl } from "../../api/client";
 import type { CollectionImage, SavedPrompt } from "../../api/types";
 import {
   loraText,
@@ -9,40 +9,33 @@ import {
   refreshAfterCollectionWrite,
   showInLibrary,
 } from "../../lib/collection";
-import { fmtDateTime, fmtInt } from "../../lib/format";
-import { useThumbnailFailure } from "../../lib/images";
+import { fmtDateTime, fmtInt, loadingText } from "../../lib/format";
 import { useCollection } from "../../state/collection";
 import { useFileActions } from "../../state/fileActions";
 import { useUi } from "../../state/ui";
-import { Modal } from "../FileActions";
 import { Glyph } from "../icons";
-import { Button, CloseButton, CopyButton, PRIMARY, td } from "../ui";
-
-const LINK =
-  "rounded border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800";
+import { Button, DESTRUCTIVE, Heading, LINK_BUTTON, Thumbnail, td } from "../ui";
+import {
+  GraphCopyButtons,
+  Modal,
+  PromptBox,
+  ViewerHeader,
+  ViewerModal,
+  ViewerSidebar,
+  ZoomableImage,
+} from "../Modals";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <div className="mb-0.5 text-xs font-semibold text-zinc-500">{title}</div>
+      <Heading>{title}</Heading>
       {children}
     </div>
   );
 }
 
 function PromptText({ label, text }: { label: string; text: string }) {
-  if (!text) return null;
-  return (
-    <div>
-      <div className="mb-0.5 flex items-center justify-between">
-        <span className="text-xs font-semibold text-zinc-500">{label}</span>
-        <CopyButton label={`Copy ${label.toLowerCase()}`} text={text} />
-      </div>
-      <pre className="rounded bg-zinc-100 p-2 font-sans text-xs break-words whitespace-pre-wrap dark:bg-zinc-900">
-        {text}
-      </pre>
-    </div>
-  );
+  return text ? <PromptBox label={label} text={text} /> : null;
 }
 
 function Thumb({
@@ -56,59 +49,34 @@ function Thumb({
   onClick?: () => void;
   title: string;
 }) {
-  const [failed, onThumbnailError] = useThumbnailFailure();
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={!onClick}
       title={title}
-      className={`h-16 w-16 shrink-0 overflow-hidden rounded bg-zinc-100 disabled:cursor-default dark:bg-zinc-900 ${
-        selected ? "outline-2 outline-sky-500" : ""
+      className={`h-16 w-16 shrink-0 overflow-hidden rounded bg-subtle disabled:cursor-default ${
+        selected ? "outline-2 outline-accent" : ""
       }`}
     >
-      {!failed && (
-        <img
-          src={thumbUrl(image.content_hash)}
-          loading="lazy"
-          alt=""
-          onError={onThumbnailError}
-          className="h-full w-full object-contain"
-        />
-      )}
+      <Thumbnail hash={image.content_hash} />
     </button>
   );
 }
 
 function ImagePane({ prompt }: { prompt: SavedPrompt }) {
   const [index, setIndex] = useState(0);
-  const [actualSize, setActualSize] = useState(false);
   const shown = prompt.references[Math.min(index, prompt.references.length - 1)];
   if (!shown) {
     return (
-      <div className="flex min-w-0 flex-1 items-center justify-center bg-black p-8 text-zinc-400">
+      <div className="flex min-w-0 flex-1 items-center justify-center bg-stage p-8 text-on-stage">
         No reference image
       </div>
     );
   }
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-black">
-      <div
-        className={`flex min-h-0 flex-1 ${actualSize ? "overflow-auto" : "items-center justify-center overflow-hidden"}`}
-        onClick={() => setActualSize(!actualSize)}
-        title={actualSize ? "Click to fit" : "Click for 1:1"}
-      >
-        <img
-          key={shown.content_hash}
-          src={originalUrl(shown.content_hash)}
-          alt=""
-          className={
-            actualSize
-              ? "max-w-none cursor-zoom-out"
-              : "max-h-full max-w-full cursor-zoom-in object-contain"
-          }
-        />
-      </div>
+    <div className="flex min-w-0 flex-1 flex-col bg-stage">
+      <ZoomableImage src={originalUrl(shown.content_hash)} className="min-h-0 flex-1" />
       {prompt.references.length > 1 && (
         <div className="flex shrink-0 gap-1 overflow-x-auto p-2">
           {prompt.references.map((r, i) => (
@@ -157,7 +125,7 @@ function Attempts({ prompt }: { prompt: SavedPrompt }) {
                 title="Unlink this image"
                 aria-label="Unlink this image"
                 onClick={() => void unlink(a.content_hash)}
-                className="absolute top-0.5 right-0.5 hidden rounded bg-black/60 p-0.5 text-white group-hover:block"
+                className="absolute top-0.5 right-0.5 hidden rounded bg-overlay/60 p-0.5 text-on-overlay group-hover:block"
               >
                 <Glyph name="x" className="size-3" />
               </button>
@@ -177,22 +145,7 @@ function RawCopy({ hash }: { hash: string }) {
       queryFn: () => api.originalRaw(hash),
       staleTime: Infinity,
     });
-  return (
-    <>
-      <CopyButton
-        label="Copy prompt JSON"
-        text={async () => JSON.stringify((await raw()).prompt, null, 2)}
-      >
-        Prompt JSON
-      </CopyButton>
-      <CopyButton
-        label="Copy workflow JSON"
-        text={async () => JSON.stringify((await raw()).workflow, null, 2)}
-      >
-        Workflow JSON
-      </CopyButton>
-    </>
-  );
+  return <GraphCopyButtons load={raw} />;
 }
 
 function DeleteDialog({ prompt, onClose }: { prompt: SavedPrompt; onClose: () => void }) {
@@ -212,18 +165,13 @@ function DeleteDialog({ prompt, onClose }: { prompt: SavedPrompt; onClose: () =>
   };
   return (
     <Modal title={`Delete “${prompt.title}”?`} onClose={onClose}>
-      <p className="mb-4 text-xs text-zinc-500">
+      <p className="mb-4 text-xs text-muted">
         The saved prompt and its copied reference images are removed from the collection. Library
         files are never touched.
       </p>
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>Cancel</Button>
-        <button
-          type="button"
-          autoFocus
-          onClick={() => void remove()}
-          className={`${PRIMARY} border-red-600 bg-red-600 hover:bg-red-700`}
-        >
+        <button type="button" autoFocus onClick={() => void remove()} className={DESTRUCTIVE}>
           Delete
         </button>
       </div>
@@ -251,21 +199,21 @@ function Details({ prompt }: { prompt: SavedPrompt }) {
         <Button onClick={() => openEditor({ mode: "edit", prompt })}>Edit</Button>
         {withWorkflow && <RawCopy hash={withWorkflow.content_hash} />}
         {first && (
-          <a href={`${originalUrl(first.content_hash)}?download=true`} className={LINK}>
+          <a href={`${originalUrl(first.content_hash)}?download=true`} className={LINK_BUTTON}>
             Download original
           </a>
         )}
-        <Button onClick={() => setDeleting(true)} className="text-red-600 dark:text-red-400">
+        <Button onClick={() => setDeleting(true)} className="text-danger">
           Delete
         </Button>
       </div>
       {(prompt.tags.length > 0 || prompt.model_family || prompt.source_url) && (
         <div className="space-y-1 text-xs">
-          {prompt.model_family && <div className="text-zinc-500">{prompt.model_family}</div>}
+          {prompt.model_family && <div className="text-muted">{prompt.model_family}</div>}
           {prompt.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {prompt.tags.map((t) => (
-                <span key={t} className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">
+                <span key={t} className="rounded bg-subtle px-1.5 py-0.5">
                   {t}
                 </span>
               ))}
@@ -276,7 +224,7 @@ function Details({ prompt }: { prompt: SavedPrompt }) {
               href={prompt.source_url}
               target="_blank"
               rel="noreferrer"
-              className="block break-all text-sky-600 hover:underline dark:text-sky-400"
+              className="block break-all text-link hover:underline"
             >
               {prompt.source_url}
             </a>
@@ -290,7 +238,7 @@ function Details({ prompt }: { prompt: SavedPrompt }) {
           <tbody>
             {settings.map((row) => (
               <tr key={row.label}>
-                <td className={`${td} w-32 text-zinc-500`}>{row.label}</td>
+                <td className={`${td} w-32 text-muted`}>{row.label}</td>
                 <td className={`${td} break-all`}>{row.value}</td>
               </tr>
             ))}
@@ -312,7 +260,7 @@ function Details({ prompt }: { prompt: SavedPrompt }) {
         </Section>
       )}
       <Attempts prompt={prompt} />
-      <div className="text-xs text-zinc-500">
+      <div className="text-xs text-muted">
         Saved {fmtDateTime(prompt.created_at)}
         {prompt.updated_at !== prompt.created_at && `, changed ${fmtDateTime(prompt.updated_at)}`}
       </div>
@@ -348,39 +296,26 @@ export default function PromptDetail() {
   if (id === null) return null;
   const prompt = query.data;
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-md"
-      onClick={() => openPrompt(null)}
+    <ViewerModal
+      layer="z-40"
+      label={prompt?.title ?? "Saved prompt"}
+      onClose={() => openPrompt(null)}
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={prompt?.title ?? "Saved prompt"}
-        className="flex h-[90vh] w-[90vw] overflow-hidden rounded-lg bg-white shadow-2xl dark:bg-zinc-950"
-        onClick={(e) => e.stopPropagation()}
+      {prompt ? <ImagePane key={prompt.id} prompt={prompt} /> : <div className="flex-1 bg-stage" />}
+      <ViewerSidebar
+        header={
+          <ViewerHeader onClose={() => openPrompt(null)}>
+            <Glyph name="bookmark" className="size-4 text-link" />
+            <span className="min-w-0 flex-1 truncate font-medium">{prompt?.title ?? "…"}</span>
+          </ViewerHeader>
+        }
       >
         {prompt ? (
-          <ImagePane key={prompt.id} prompt={prompt} />
+          <Details prompt={prompt} />
         ) : (
-          <div className="flex-1 bg-black" />
+          <div className="p-4 text-muted">{loadingText(query.error)}</div>
         )}
-        <div className="flex w-[460px] shrink-0 flex-col border-l border-zinc-200 dark:border-zinc-800">
-          <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-            <Glyph name="bookmark" className="size-4 text-sky-600" />
-            <span className="min-w-0 flex-1 truncate font-medium">{prompt?.title ?? "…"}</span>
-            <CloseButton onClick={() => openPrompt(null)} />
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {prompt ? (
-              <Details prompt={prompt} />
-            ) : (
-              <div className="p-4 text-zinc-500">
-                {query.isError ? query.error.message : "Loading…"}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+      </ViewerSidebar>
+    </ViewerModal>
   );
 }

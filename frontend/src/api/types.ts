@@ -33,7 +33,6 @@ export interface Filters {
 export interface Scope {
   selection: number[];
   filters: Filters;
-  pool: boolean;
 }
 
 export interface ScopeInfo {

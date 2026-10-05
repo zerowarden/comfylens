@@ -18,9 +18,8 @@ const num = (v: unknown) => (typeof v === "number" ? fmtNum(v) : "?");
 export const FIELD_SEPARATOR = " | ";
 
 /** A configuration's fields in display order: model, LoRA stack, sampler/scheduler, steps, ... */
-export function configParts(fields: Record<string, unknown>, withFamily: boolean): string[] {
+export function configParts(fields: Record<string, unknown>): string[] {
   const parts = [
-    ...(withFamily ? [str(fields.model_family)] : []),
     str(fields.base_model),
     str(fields.lora_stack_key),
     `${str(fields.sampler_name)}/${str(fields.scheduler)}`,
@@ -33,8 +32,8 @@ export function configParts(fields: Record<string, unknown>, withFamily: boolean
   return parts;
 }
 
-export function configText(fields: Record<string, unknown>, withFamily: boolean): string {
-  return configParts(fields, withFamily).join(FIELD_SEPARATOR);
+export function configText(fields: Record<string, unknown>): string {
+  return configParts(fields).join(FIELD_SEPARATOR);
 }
 
 /** Categorical values that map onto a filter: clicking one adds it. */

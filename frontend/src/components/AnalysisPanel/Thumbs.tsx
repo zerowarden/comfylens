@@ -1,26 +1,16 @@
-import { thumbUrl } from "../../api/client";
-import { useThumbnailFailure } from "../../lib/images";
 import { useUi } from "../../state/ui";
+import { Thumbnail } from "../ui";
 
 function Thumb({ id, hash }: { id: number; hash: string | undefined }) {
   const openDetail = useUi((s) => s.openDetail);
-  const [failed, onThumbnailError] = useThumbnailFailure();
   return (
     <button
       type="button"
       onClick={() => openDetail(id)}
       title={`Open image ${id}`}
-      className="h-12 w-12 shrink-0 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-900"
+      className="h-12 w-12 shrink-0 overflow-hidden rounded bg-subtle"
     >
-      {hash && !failed && (
-        <img
-          src={thumbUrl(hash)}
-          loading="lazy"
-          alt=""
-          onError={onThumbnailError}
-          className="h-full w-full object-contain"
-        />
-      )}
+      <Thumbnail hash={hash} />
     </button>
   );
 }

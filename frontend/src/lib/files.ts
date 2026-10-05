@@ -35,6 +35,19 @@ export function nameProblem(current: string, next: string): string | null {
   return null;
 }
 
+/** The file name in a Content-Disposition header, as Starlette writes it; null without one. */
+export function attachmentName(header: string): string | null {
+  const encoded = /filename\*=utf-8''([^;]+)/i.exec(header);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1]!);
+    } catch {
+      return null;
+    }
+  }
+  return /filename="([^"]*)"/i.exec(header)?.[1] ?? null;
+}
+
 export function chunks<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));

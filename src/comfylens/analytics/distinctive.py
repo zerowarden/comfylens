@@ -6,11 +6,11 @@ counts scaled to alpha0 pseudo-counts; unlike raw frequency ratios, it does not 
 rare terms.
 """
 
-from typing import Any, Literal
+from typing import Any
 
 import polars as pl
 
-from comfylens.analytics.prompts import PromptFrames, Side, document_weight, with_keys
+from comfylens.analytics.prompts import By, PromptFrames, Side, document_weight, with_keys
 
 TOP_DISTINCTIVE = 25
 KINDS = {"phrases": "phrase", "unigrams": "1g", "bigrams": "2g", "trigrams": "3g"}
@@ -23,7 +23,7 @@ def distinctive_terms(
     rest: pl.DataFrame,
     library: pl.DataFrame,
     side: Side,
-    by: Literal["image", "unique_prompt"],
+    by: By,
     alpha0: float,
 ) -> dict[str, dict[str, Any]]:
     """Lists per group. Each frame has columns id and group; `library` gives the prior.

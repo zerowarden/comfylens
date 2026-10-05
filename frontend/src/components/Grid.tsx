@@ -13,7 +13,7 @@ import { SORT_KEYS, useFilters } from "../state/filters";
 import { hiddenCount, marqueeSelect, useSelection } from "../state/selection";
 import { TILE_MAX, TILE_MIN, useUi } from "../state/ui";
 import Tile from "./Tile";
-import { Button } from "./ui";
+import { Button, FIELD } from "./ui";
 
 const PAD = 8;
 const GAP = 6;
@@ -48,18 +48,18 @@ function Toolbar({ total }: { total: number }) {
   const tileSize = useUi((s) => s.tileSize);
   const setTileSize = useUi((s) => s.setTileSize);
   return (
-    <div className="flex h-9 shrink-0 items-center gap-3 border-b border-zinc-200 px-3 dark:border-zinc-800">
-      <span className="text-zinc-500 tabular-nums">{fmtInt(total)} images</span>
+    <div className="flex h-9 shrink-0 items-center gap-3 border-b border-line px-3">
+      <span className="text-muted tabular-nums">{fmtInt(total)} images</span>
       <div className="flex-1" />
-      <label className="flex items-center gap-1 text-xs text-zinc-500">
+      <label className="flex items-center gap-1 text-xs text-muted">
         Sort
         <select
           value={sort.key}
           onChange={(e) => setSort({ ...sort, key: e.target.value as SortKey })}
-          className="rounded border border-zinc-300 bg-transparent px-1 py-0.5 text-zinc-900 dark:border-zinc-700 dark:text-zinc-100"
+          className={`px-1 py-0.5 text-fg ${FIELD}`}
         >
           {SORT_KEYS.map((k) => (
-            <option key={k} value={k} className="bg-white dark:bg-zinc-900">
+            <option key={k} value={k} className="bg-surface">
               {SORT_LABELS[k]}
             </option>
           ))}
@@ -71,7 +71,7 @@ function Toolbar({ total }: { total: number }) {
       >
         {sort.descending ? "↓ desc" : "↑ asc"}
       </Button>
-      <label className="flex items-center gap-1 text-xs text-zinc-500">
+      <label className="flex items-center gap-1 text-xs text-muted">
         Size
         <input
           type="range"
@@ -93,17 +93,17 @@ function SelectionBanner({ order }: { order: number[] }) {
   // Always the same height: a bar that appeared on the first click would push every tile down.
   if (selected.size === 0)
     return (
-      <div className="flex h-8 shrink-0 items-center px-3 text-xs text-zinc-500">
+      <div className="flex h-8 shrink-0 items-center px-3 text-xs text-muted">
         No selection: the analysis covers every image shown. Click, Ctrl+click, Shift+click or drag
         to select.
       </div>
     );
   const hidden = hiddenCount(selected, visible);
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 bg-sky-500/10 px-3 text-sm">
+    <div className="flex h-8 shrink-0 items-center gap-2 bg-accent/10 px-3 text-sm">
       <span>
         {fmtInt(selected.size)} selected
-        {hidden > 0 && <span className="text-zinc-500"> ({fmtInt(hidden)} hidden by filters)</span>}
+        {hidden > 0 && <span className="text-muted"> ({fmtInt(hidden)} hidden by filters)</span>}
       </span>
       <Button onClick={clear}>Clear selection</Button>
       {selected.size === 2 && (
@@ -114,7 +114,7 @@ function SelectionBanner({ order }: { order: number[] }) {
           Compare
         </Button>
       )}
-      <span className="text-xs text-zinc-500">Esc clears, Enter opens</span>
+      <span className="text-xs text-muted">Esc clears, Enter opens</span>
     </div>
   );
 }
@@ -312,9 +312,9 @@ export default function Grid() {
         onMouseDown={onMouseDown}
         className="relative min-h-0 flex-1 overflow-y-auto select-none"
       >
-        {query.isError && <div className="p-4 text-red-600">{query.error.message}</div>}
+        {query.isError && <div className="p-4 text-danger">{query.error.message}</div>}
         {query.isSuccess && order.length === 0 && (
-          <div className="p-8 text-center text-zinc-500">No images match the filters.</div>
+          <div className="p-8 text-center text-muted">No images match the filters.</div>
         )}
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualRows.map((row) => (
@@ -349,7 +349,7 @@ export default function Grid() {
         </div>
         {marquee?.moved && (
           <div
-            className="pointer-events-none absolute border border-sky-500 bg-sky-500/10"
+            className="pointer-events-none absolute border border-accent bg-accent/10"
             style={{
               left: Math.min(marquee.x0, marquee.x1),
               top: Math.min(marquee.y0, marquee.y1),

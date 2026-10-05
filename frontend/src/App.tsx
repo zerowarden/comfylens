@@ -1,5 +1,3 @@
-import { useEffect } from "react";
-
 import AnalysisPanel from "./components/AnalysisPanel/AnalysisPanel";
 import CollectionView from "./components/Collection/CollectionView";
 import LinkDialog from "./components/Collection/LinkDialog";
@@ -15,13 +13,7 @@ import TopBar from "./components/TopBar";
 import { useUi } from "./state/ui";
 
 export default function App() {
-  const theme = useUi((s) => s.theme);
-  const sidebarOpen = useUi((s) => s.sidebarOpen);
   const view = useUi((s) => s.view);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-  }, [theme]);
 
   return (
     <div className="flex h-full min-w-[1280px] flex-col">
@@ -30,7 +22,7 @@ export default function App() {
         <CollectionView />
       ) : (
         <div className="flex min-h-0 flex-1">
-          {sidebarOpen && <FilterSidebar />}
+          <FilterSidebar />
           <main className="flex min-w-0 flex-1 flex-col">
             <Timeline />
             <Grid />

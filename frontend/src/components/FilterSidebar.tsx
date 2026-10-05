@@ -3,12 +3,11 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { api } from "../api/client";
 import type { FacetValue, NumericFilterField, Range } from "../api/types";
-import { familyColor } from "../lib/colors";
 import { fmtInt, fmtNum } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 import { hasActiveFilters, useFilters, type ListField } from "../state/filters";
 import { ChainText, Glyph } from "./icons";
-import { Button, Segmented } from "./ui";
+import { Button, FIELD, FamilyDot, Segmented } from "./ui";
 
 const SHOWN = 8;
 
@@ -35,9 +34,9 @@ function FacetList({
     all || search ? matching : matching.filter((v, i) => i < SHOWN || selected.includes(v.value));
   if (values.length === 0) return null;
   return (
-    <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+    <div className="border-b border-line px-3 py-2">
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">{title}</span>
+        <span className="text-xs font-semibold tracking-wide text-muted uppercase">{title}</span>
         {extra}
       </div>
       {values.length > 12 && (
@@ -45,28 +44,23 @@ function FacetList({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search"
-          className="mb-1 w-full rounded border border-zinc-300 bg-transparent px-1.5 py-0.5 text-xs dark:border-zinc-700"
+          className={`mb-1 w-full px-1.5 py-0.5 text-xs ${FIELD}`}
         />
       )}
       <ul>
         {shown.map((v) => (
           <li key={v.value}>
-            <label className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-900">
+            <label className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-hover">
               <input
                 type="checkbox"
                 checked={selected.includes(v.value)}
                 onChange={() => onToggle(v.value)}
               />
-              {colored && (
-                <span
-                  className="inline-block h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: familyColor(v.value) }}
-                />
-              )}
+              {colored && <FamilyDot family={v.value} />}
               <span className="min-w-0 flex-1 truncate" title={v.value}>
                 {colored ? <ChainText text={v.value} kind="pipeline" /> : v.value}
               </span>
-              <span className="text-xs text-zinc-500 tabular-nums">{fmtInt(v.count)}</span>
+              <span className="text-xs text-muted tabular-nums">{fmtInt(v.count)}</span>
             </label>
           </li>
         ))}
@@ -75,7 +69,7 @@ function FacetList({
         <button
           type="button"
           onClick={() => setAll(!all)}
-          className="mt-0.5 text-xs text-sky-600 hover:underline dark:text-sky-400"
+          className="mt-0.5 text-xs text-link hover:underline"
         >
           {all ? "Show fewer" : `Show all ${matching.length}`}
         </button>
@@ -130,14 +124,14 @@ function RangeFilter({ field, range }: { field: NumericFilterField; range: Range
     <div className="mb-2">
       <div className="flex justify-between text-xs">
         <span>{field}</span>
-        <span className="text-zinc-500 tabular-nums">
+        <span className="text-muted tabular-nums">
           {fmtNum(value[0])} – {fmtNum(value[1])}
           {current && (
             <button
               type="button"
               title={`Clear the ${field} filter`}
               aria-label={`Clear the ${field} filter`}
-              className="ml-1 align-[-0.125em] hover:text-red-500"
+              className="ml-1 align-[-0.125em] hover:text-danger"
               onClick={() => setValue([min, max])}
             >
               <Glyph name="x" className="size-3" />
@@ -146,7 +140,7 @@ function RangeFilter({ field, range }: { field: NumericFilterField; range: Range
         </span>
       </div>
       <div className="relative h-5">
-        <div className="absolute top-2 h-1 w-full rounded bg-zinc-200 dark:bg-zinc-800" />
+        <div className="absolute top-2 h-1 w-full rounded bg-track" />
         <input
           type="range"
           className={input}
@@ -188,12 +182,12 @@ function TextSearch() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced]);
   return (
-    <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
+    <div className="border-b border-line px-3 py-2">
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Search prompts"
-        className="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+        className={`w-full px-2 py-1 ${FIELD}`}
       />
     </div>
   );
@@ -211,8 +205,8 @@ function CollectionFilter() {
     retry: false,
   });
   return (
-    <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-      <div className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+    <div className="border-b border-line px-3 py-2">
+      <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
         Collection
       </div>
       <Segmented
@@ -225,8 +219,8 @@ function CollectionFilter() {
         onChange={(v) => update((x) => ({ ...x, saved: v === "any" ? null : v === "saved" }))}
       />
       {promptId !== null && (
-        <div className="mt-2 flex items-center gap-1.5 rounded bg-sky-500/10 px-2 py-1 text-xs">
-          <Glyph name="bookmark" className="size-3 shrink-0 text-sky-600" />
+        <div className="mt-2 flex items-center gap-1.5 rounded bg-accent/10 px-2 py-1 text-xs">
+          <Glyph name="bookmark" className="size-3 shrink-0 text-link" />
           <span
             className="min-w-0 flex-1 truncate"
             title="Linked to this saved prompt, or the same prompt text"
@@ -237,7 +231,7 @@ function CollectionFilter() {
             type="button"
             title="Clear the saved prompt filter"
             aria-label="Clear the saved prompt filter"
-            className="hover:text-red-500"
+            className="hover:text-danger"
             onClick={() => update((x) => ({ ...x, saved_prompt: null }))}
           >
             <Glyph name="x" className="size-3" />
@@ -268,7 +262,7 @@ export default function FilterSidebar() {
     : [];
 
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col overflow-y-auto border-r border-zinc-200 dark:border-zinc-800">
+    <aside className="flex w-[280px] shrink-0 flex-col overflow-y-auto border-r border-line">
       <div className="flex items-center justify-between px-3 py-2">
         <span className="font-semibold">Filters</span>
         <Button onClick={clear} disabled={!hasActiveFilters(filters)}>
@@ -276,7 +270,7 @@ export default function FilterSidebar() {
         </Button>
       </div>
       <TextSearch />
-      {facets.isError && <div className="px-3 py-2 text-red-600">{facets.error.message}</div>}
+      {facets.isError && <div className="px-3 py-2 text-danger">{facets.error.message}</div>}
       {lists.slice(0, 2).map(([title, field, values]) => (
         <FacetList
           key={field}
@@ -315,14 +309,12 @@ export default function FilterSidebar() {
         />
       ))}
       {f && (
-        <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-          <div className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
-            Date
-          </div>
+        <div className="border-b border-line px-3 py-2">
+          <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">Date</div>
           <div className="flex items-center gap-1">
             <input
               type="date"
-              className="w-full rounded border border-zinc-300 bg-transparent px-1 dark:border-zinc-700"
+              className={`w-full px-1 ${FIELD}`}
               value={filters.date_from ?? ""}
               min={f.date_range.min ?? undefined}
               max={f.date_range.max ?? undefined}
@@ -331,7 +323,7 @@ export default function FilterSidebar() {
             <span>–</span>
             <input
               type="date"
-              className="w-full rounded border border-zinc-300 bg-transparent px-1 dark:border-zinc-700"
+              className={`w-full px-1 ${FIELD}`}
               value={filters.date_to ?? ""}
               min={f.date_range.min ?? undefined}
               max={f.date_range.max ?? undefined}
@@ -341,8 +333,8 @@ export default function FilterSidebar() {
         </div>
       )}
       {f && (
-        <div className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-          <div className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+        <div className="border-b border-line px-3 py-2">
+          <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
             Settings
           </div>
           {(["cfg", "steps", "denoise"] as const).map((field) => {
@@ -353,7 +345,7 @@ export default function FilterSidebar() {
       )}
       <CollectionFilter />
       <div className="px-3 py-2">
-        <div className="mb-1 text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+        <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
           Warnings
         </div>
         <Segmented

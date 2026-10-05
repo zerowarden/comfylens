@@ -1,9 +1,8 @@
 import { useState, type ReactNode } from "react";
 
-import { familyColor } from "../../lib/colors";
 import { fmtInt } from "../../lib/format";
 import { ChainText } from "../icons";
-import { Collapsible, Message } from "../ui";
+import { Collapsible, FamilyDot, Message } from "../ui";
 
 /**
  * One collapsible section per family group, largest first. The largest is open unless the user
@@ -29,14 +28,9 @@ export default function FamilySections<T extends { family: string }>({
           onToggle={(open) => setToggled((t) => ({ ...t, [group.family]: open }))}
           title={
             <span className="flex items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{
-                  background: group.family === "all" ? "#a1a1aa" : familyColor(group.family),
-                }}
-              />
+              <FamilyDot family={group.family} large />
               <ChainText text={group.family} kind="pipeline" />
-              <span className="font-normal text-zinc-500 tabular-nums">{fmtInt(count(group))}</span>
+              <span className="font-normal text-muted tabular-nums">{fmtInt(count(group))}</span>
             </span>
           }
         >

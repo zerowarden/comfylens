@@ -3,7 +3,6 @@ import { useMemo } from "react";
 import type { Scope } from "../api/types";
 import { useFilters } from "../state/filters";
 import { useSelection } from "../state/selection";
-import { useUi } from "../state/ui";
 import { useDebounced } from "./hooks";
 
 /**
@@ -13,9 +12,8 @@ import { useDebounced } from "./hooks";
 export function useScope(): { scope: Scope; key: string } {
   const filters = useFilters((s) => s.filters);
   const selected = useSelection((s) => s.selected);
-  const pool = useUi((s) => s.pool);
   const selection = useMemo(() => [...selected].sort((a, b) => a - b), [selected]);
-  const scope = useMemo<Scope>(() => ({ selection, filters, pool }), [selection, filters, pool]);
+  const scope = useMemo<Scope>(() => ({ selection, filters }), [selection, filters]);
   const debounced = useDebounced(scope, 150);
   return useMemo(() => ({ scope: debounced, key: JSON.stringify(debounced) }), [debounced]);
 }

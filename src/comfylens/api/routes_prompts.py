@@ -56,8 +56,8 @@ def distinctive(body: DistinctiveRequest, request: Request) -> dict[str, Any] | 
         return _warming()
     analysis = server.config.analysis
     chosen = resolve(snap, body, analysis, server)
-    filtered = resolve(snap, Scope(filters=body.filters, pool=body.pool), analysis, server)
-    library = resolve(snap, Scope(pool=body.pool), analysis, server)
+    filtered = resolve(snap, Scope(filters=body.filters), analysis, server)
+    library = resolve(snap, Scope(), analysis, server)
     # Copies of selected images belong to neither side.
     picked = chosen.files.select("id", "content_hash")
     rest_rows = filtered.rows.filter(

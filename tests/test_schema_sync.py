@@ -8,7 +8,7 @@ from typing import get_args
 from pydantic import BaseModel
 
 from comfylens.analytics import scope, timeline
-from comfylens.api import schemas
+from comfylens.api import routes_images, schemas
 from comfylens.extract.types import SamplerStage
 from comfylens.metadata import types as metadata_types
 
@@ -95,3 +95,7 @@ def test_sampler_stage_fields_stay_in_sync():
     assert create is not None
     columns = set(re.findall(r"\b(\w+)\s+(?:INTEGER|TEXT|REAL)\b", create.group(1)))
     assert columns - {"file_id"} == (stage - {"index"}) | {"stage_index"}
+
+
+def test_every_sort_key_has_a_column():
+    assert set(routes_images._SORT_COLUMNS) == set(get_args(schemas.SortKey))

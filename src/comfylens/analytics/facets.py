@@ -1,12 +1,13 @@
 """Filter options with counts over the whole library (GET /api/facets)."""
 
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
 
+from comfylens.analytics.scope import NumericFilterField
 from comfylens.analytics.snapshot import NO_METADATA, Snapshot
 
-RANGE_FIELDS = ("steps", "cfg", "denoise", "guidance", "shift")
+RANGE_FIELDS: tuple[str, ...] = get_args(NumericFilterField)
 
 
 def _counts(values: pl.Series) -> list[dict[str, Any]]:

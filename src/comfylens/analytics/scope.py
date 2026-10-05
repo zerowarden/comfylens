@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol
 import polars as pl
 from pydantic import BaseModel
 
+from comfylens.analytics.collection import has_hash
 from comfylens.analytics.snapshot import NO_METADATA, Snapshot
 from comfylens.config import AnalysisConfig
 from comfylens.metadata.types import Status
@@ -68,10 +69,8 @@ class Filters(BaseModel):
 class Scope(BaseModel):
     selection: list[int] = []  # non-empty: the scope as-is, filters ignored
     filters: Filters = Filters()
-    pool: bool = False  # one group "all" instead of one per family
 
 
-POOLED = "all"
 _LIST_FILTERS = {
     "families": "model_family",
     "base_models": "base_model",
@@ -88,7 +87,7 @@ class Resolved:
     rows: pl.DataFrame  # analyzed: with a generations row, deduplicated, plus a "group" column
 
     def groups(self) -> list[tuple[str, pl.DataFrame]]:
-        """Per family (or one pooled group), largest first; families are never mixed."""
+        """Per family, largest first; families are never mixed."""
         sizes = self.rows.group_by("group").len().sort("len", "group", descending=[True, False])
         return [(g, self.rows.filter(pl.col("group") == g)) for g in sizes["group"]]
 
@@ -137,8 +136,7 @@ def filter_files(
     if f.text.strip():
         conditions.append(pl.col("id").is_in(sorted(lookup.search(f.text.strip()))))
     if f.saved is not None:
-        hashes = pl.Series(sorted(lookup.saved_hashes()), dtype=pl.String)
-        saved = pl.col("content_hash").is_in(hashes.implode())
+        saved = has_hash(lookup.saved_hashes())
         conditions.append(saved if f.saved else ~saved)
     if f.saved_prompt is not None:
         ids = pl.Series(sorted(lookup.saved_prompt_ids(f.saved_prompt)), dtype=pl.Int64)
@@ -169,8 +167,7 @@ def resolve(snap: Snapshot, scope: Scope, analysis: AnalysisConfig, lookup: Look
         # The lowest file id per content hash; unreadable files ("" hash) are never merged.
         first = pl.col("id") == pl.col("id").min().over("content_hash")
         analyzed = rows.filter(first | (pl.col("content_hash") == ""))
-    group = pl.lit(POOLED) if scope.pool else pl.col("model_family")
-    analyzed = analyzed.with_columns(group.alias("group"))
+    analyzed = analyzed.with_columns(pl.col("model_family").alias("group"))
     info = {
         "scope_kind": kind,
         "scope_size": files.height,

@@ -37,6 +37,7 @@ import type {
   TrashResponse,
   UnlinkRequest,
 } from "./types";
+import { attachmentName } from "../lib/files";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -75,6 +76,14 @@ async function upload<T>(path: string, file: Blob): Promise<T> {
   );
 }
 
+/** A file the server sends as an attachment, with the name it gives it. */
+async function download(path: string): Promise<{ blob: Blob; name: string | null }> {
+  const response = await fetch(path);
+  if (!response.ok) return parse<never>(response);
+  const name = attachmentName(response.headers.get("Content-Disposition") ?? "");
+  return { blob: await response.blob(), name };
+}
+
 async function parse<T>(response: Response): Promise<T> {
   if (response.ok) return (await response.json()) as T;
 
@@ -108,6 +117,7 @@ export const api = {
     request<RenameResponse>(`/api/images/${id}/rename`, { name } satisfies RenameRequest),
   trash: (ids: number[]) =>
     request<TrashResponse>("/api/images/trash", { ids } satisfies TrashRequest),
+  stripped: (id: number) => download(`/api/images/${id}/stripped`),
   stats: (q: StatsRequest) => request<StatsResponse>("/api/stats", q),
   timeline: (q: TimelineRequest) => request<TimelineResponse>("/api/timeline", q),
   prompts: (q: PromptsRequest) => request<PromptsResponse>("/api/prompts", q),

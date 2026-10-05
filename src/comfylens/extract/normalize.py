@@ -1,4 +1,5 @@
 import re
+from typing import Any
 
 _MODEL_EXTENSIONS = (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf", ".sft")
 _ASPECTS = [(1, 1), (4, 5), (3, 4), (2, 3), (9, 16), (9, 21)]
@@ -44,6 +45,14 @@ def aspect(width: int, height: int) -> tuple[float, str]:
 
 def megapixels(width: int, height: int) -> float:
     return round(width * height / 1_000_000, 3)
+
+
+def size_facts(width: int | None, height: int | None) -> dict[str, Any]:
+    """megapixels, aspect and aspect_label of an image; None for each without both sides."""
+    if not (width and height):
+        return {"megapixels": None, "aspect": None, "aspect_label": None}
+    ratio, label = aspect(width, height)
+    return {"megapixels": megapixels(width, height), "aspect": ratio, "aspect_label": label}
 
 
 def prompt_ws(text: str) -> str:

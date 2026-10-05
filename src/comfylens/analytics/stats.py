@@ -7,9 +7,9 @@ import polars as pl
 
 from comfylens.analytics.categorical import seed_stats, value_counts
 from comfylens.analytics.configs import top_configs
-from comfylens.analytics.loras import lora_table, stacks
+from comfylens.analytics.loras import LoraKey, lora_table, stacks
 from comfylens.analytics.numeric import HistogramSpec, numeric_stats
-from comfylens.analytics.scope import POOLED, Resolved
+from comfylens.analytics.scope import Resolved
 from comfylens.analytics.snapshot import Snapshot
 from comfylens.config import AnalysisConfig
 
@@ -47,7 +47,7 @@ def compute_stats(
     snap: Snapshot,
     resolved: Resolved,
     sections: list[str],
-    lora_key: str,
+    lora_key: LoraKey,
     analysis: AnalysisConfig,
 ) -> list[dict[str, Any]]:
     spec = histogram_spec(analysis)
@@ -61,15 +61,14 @@ def compute_stats(
                 for name in NUMERIC_FIELDS
             }
         if "categorical" in sections:
-            fields = (("model_family",) if group == POOLED else ()) + CATEGORICAL_FIELDS
             block["categorical"] = {
-                name: value_counts(rows[name], analysis.top_n) for name in fields
+                name: value_counts(rows[name], analysis.top_n) for name in CATEGORICAL_FIELDS
             }
         if "seeds" in sections:
             block["seeds"] = seed_stats(rows["seed"])
         if "loras" in sections:
             uses = snap.loras.filter(pl.col("file_id").is_in(rows["id"].implode()))
-            block["loras"] = lora_table(uses, size, lora_key, analysis.round_decimals, spec)  # type: ignore[arg-type]
+            block["loras"] = lora_table(uses, size, lora_key, analysis.round_decimals, spec)
         if "stacks" in sections:
             block["stacks"] = stacks(rows, analysis.top_n)
         if "configs" in sections:

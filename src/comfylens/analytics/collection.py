@@ -12,10 +12,14 @@ from comfylens.analytics.snapshot import Snapshot
 from comfylens.collection.store import Links
 
 
+def has_hash(hashes: Collection[str]) -> pl.Expr:
+    """Whether a file's content hash is one of `hashes`."""
+    return pl.col("content_hash").is_in(pl.Series(sorted(hashes), dtype=pl.String).implode())
+
+
 def hash_matches(snap: Snapshot, hashes: Collection[str]) -> pl.DataFrame:
     """id and content_hash of the served files with one of `hashes`."""
-    wanted = pl.Series(sorted(hashes), dtype=pl.String).implode()
-    return snap.images.filter(pl.col("content_hash").is_in(wanted)).select("id", "content_hash")
+    return snap.images.filter(has_hash(hashes)).select("id", "content_hash")
 
 
 def keyed_files(snap: Snapshot) -> pl.DataFrame | None:

@@ -5,13 +5,16 @@ import polars as pl
 
 from comfylens.analytics.numeric import HistogramSpec, numeric_stats
 
+# LoRAs are grouped by file name, or by base name across versions.
+LoraKey = Literal["name", "base_name"]
+
 EXAMPLES = 6
 
 
 def lora_table(
     uses: pl.DataFrame,
     group_size: int,
-    key: Literal["name", "base_name"],
+    key: LoraKey,
     round_decimals: int,
     histogram: HistogramSpec,
 ) -> list[dict[str, Any]]:

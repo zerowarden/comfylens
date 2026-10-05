@@ -11,7 +11,7 @@ import { Button, FilterLink } from "../ui";
 function Ref({ prompt, extra }: { prompt: PromptRef; extra?: ReactNode }) {
   return (
     <li className="flex items-center gap-2">
-      <Glyph name="bookmark" className="size-3 text-sky-600" />
+      <Glyph name="bookmark" className="size-3 text-link" />
       <span className="min-w-0 flex-1 truncate">
         <FilterLink title="Open the saved prompt" onClick={() => openSavedPrompt(prompt.id)}>
           {prompt.title}
@@ -34,7 +34,7 @@ export default function CollectionSection({ id }: { id: number }) {
   return (
     <div className="space-y-1 text-xs">
       <div className="flex items-center gap-2">
-        <span className="flex-1 font-semibold text-zinc-500">Collection</span>
+        <span className="flex-1 font-semibold text-muted">Collection</span>
         <Button
           className="inline-flex items-center gap-1"
           onClick={() => void saveImageToCollection(id)}
@@ -43,17 +43,17 @@ export default function CollectionSection({ id }: { id: number }) {
         </Button>
         <Button onClick={() => openLinking([id])}>Add to saved prompt…</Button>
       </div>
-      {query.isError && <div className="text-zinc-500">{query.error.message}</div>}
+      {query.isError && <div className="text-muted">{query.error.message}</div>}
       {data && data.linked.length > 0 && (
         <div>
-          <div className="text-zinc-500">Saved in</div>
+          <div className="text-muted">Saved in</div>
           <ul>
             {data.linked.map((p) => (
               <Ref
                 key={p.id}
                 prompt={p}
                 extra={
-                  <span className="text-zinc-500">
+                  <span className="text-muted">
                     {p.role === "reference" ? "reference" : "attempt"}
                   </span>
                 }
@@ -64,7 +64,7 @@ export default function CollectionSection({ id }: { id: number }) {
       )}
       {data && data.matching.length > 0 && (
         <div>
-          <div className="text-zinc-500">Same prompt as</div>
+          <div className="text-muted">Same prompt as</div>
           <ul>
             {data.matching.map((p) => (
               <Ref

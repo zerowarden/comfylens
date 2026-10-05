@@ -1,9 +1,9 @@
 import { useState } from "react";
 
-import { fmtInt, fmtNum, fmtPct } from "../../lib/format";
+import { fmtInt, fmtNum, fmtPct, loadingText } from "../../lib/format";
 import { useFilters } from "../../state/filters";
 import { ChainText } from "../icons";
-import { FilterLink, Message, Segmented, ShareBar, td, th } from "../ui";
+import { FilterLink, Heading, Message, Segmented, ShareBar, td, th } from "../ui";
 import { useStats } from "./data";
 import FamilySections from "./FamilySections";
 import { modeText, rangeText } from "./format";
@@ -16,7 +16,7 @@ export default function Loras() {
   return (
     <div>
       <div className="flex items-center gap-2 px-3 py-2">
-        <span className="text-xs text-zinc-500">Group by</span>
+        <span className="text-xs text-muted">Group by</span>
         <Segmented
           value={key}
           options={[
@@ -27,13 +27,13 @@ export default function Loras() {
         />
       </div>
       {!data ? (
-        <Message>{stats.isError ? stats.error.message : "Loading…"}</Message>
+        <Message>{loadingText(stats.error)}</Message>
       ) : (
         <FamilySections groups={data.groups} count={(g) => g.images}>
           {(group) => (
             <>
               {(group.loras ?? []).length === 0 && (
-                <div className="text-zinc-500">No LoRAs in use.</div>
+                <div className="text-muted">No LoRAs in use.</div>
               )}
               {(group.loras ?? []).length > 0 && (
                 <table className="mb-3 w-full text-xs">
@@ -58,7 +58,7 @@ export default function Loras() {
                             {row.name}
                           </FilterLink>
                           {row.steps && row.steps.length > 0 && (
-                            <div className="text-zinc-500">
+                            <div className="text-muted">
                               steps:{" "}
                               {row.steps.map((s) => `${s.value ?? "none"} ×${s.count}`).join(", ")}
                             </div>
@@ -67,7 +67,7 @@ export default function Loras() {
                         <td className={`${td} w-20`}>
                           <div className="tabular-nums">
                             {fmtInt(row.images)}{" "}
-                            <span className="text-zinc-500">{fmtPct(row.share)}</span>
+                            <span className="text-muted">{fmtPct(row.share)}</span>
                           </div>
                           <ShareBar share={row.share} />
                         </td>
@@ -86,7 +86,7 @@ export default function Loras() {
               )}
               {(group.stacks ?? []).length > 0 && (
                 <>
-                  <div className="mb-0.5 text-xs font-semibold text-zinc-500">Stacks</div>
+                  <Heading>Stacks</Heading>
                   <table className="w-full text-xs">
                     <tbody>
                       {group.stacks!.map((s) => (
@@ -95,8 +95,7 @@ export default function Loras() {
                             <ChainText text={s.key} kind="lora" />
                           </td>
                           <td className={`${td} text-right whitespace-nowrap tabular-nums`}>
-                            {fmtInt(s.count)}{" "}
-                            <span className="text-zinc-500">{fmtPct(s.share)}</span>
+                            {fmtInt(s.count)} <span className="text-muted">{fmtPct(s.share)}</span>
                           </td>
                         </tr>
                       ))}

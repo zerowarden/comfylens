@@ -12,6 +12,8 @@ from graph_builder import basic_txt2img
 from comfylens.api.app import create_app
 from comfylens.config import Config
 from comfylens.index.indexer import Indexer
+from comfylens.metadata import read_metadata
+from comfylens.metadata.strip import strip_metadata
 from comfylens.paths import catalog_path, thumbs_dir
 from comfylens.version import SCHEMA_VERSION
 
@@ -165,14 +167,10 @@ def test_stats_sections(client: TestClient):
     assert qwen["loras"][0]["name"] == "qwen2.1-anime2real-sunburst"
 
 
-def test_stats_pooled_and_base_name(client: TestClient):
-    (pooled,) = client.post("/api/stats", json={"pool": True}).json()["groups"]
-    assert pooled["family"] == "all" and pooled["images"] == 5
-    families = pooled["categorical"]["model_family"]["values"]
-    assert [(v["value"], v["count"]) for v in families] == [("flux", 4), ("qwen-image-2.1", 1)]
-    only = client.post(
-        "/api/stats", json={"sections": ["loras"], "lora_key": "base_name", "pool": True}
-    ).json()["groups"][0]
+def test_stats_base_name(client: TestClient):
+    only = client.post("/api/stats", json={"sections": ["loras"], "lora_key": "base_name"}).json()[
+        "groups"
+    ][0]
     assert only.get("numeric") is None
     assert all(row["steps"] is not None for row in only["loras"])
 
@@ -305,10 +303,45 @@ def test_original_file(client: TestClient, library: Path):
     assert attached.headers["content-disposition"].startswith("attachment")
 
 
+def test_stripped_copy(client: TestClient, library: Path):
+    path = library / "fox1.png"
+    original, mtime_ns = path.read_bytes(), path.stat().st_mtime_ns
+    file_id = ids_by_path(client)["fox1.png"]
+    r = client.get(f"/api/images/{file_id}/stripped")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert r.headers["content-disposition"] == 'attachment; filename="fox1.png"'
+    assert read_metadata(r.content).texts == {}
+    assert r.content == strip_metadata(original) and len(r.content) < len(original)
+    # The original keeps its bytes, metadata included, and its modification time.
+    assert path.read_bytes() == original and path.stat().st_mtime_ns == mtime_ns
+    assert read_metadata(original).texts
+
+
+def test_stripped_copy_of_an_escaped_name(tmp_path: Path, config: Config):
+    root = tmp_path / "names"
+    write(root, 'a "fox" é.png', golden_png(), T0)
+    Indexer(root, config, workers=1).run()
+    with TestClient(create_app(root, config, index_on_start=False, web_dir=None)) as c:
+        r = c.get("/api/images/1/stripped")
+    assert r.headers["content-disposition"] == (
+        "attachment; filename*=utf-8''a%20%22fox%22%20%C3%A9.png"
+    )
+
+
+def test_stripped_copy_of_a_damaged_file_is_422(client: TestClient, library: Path):
+    file_id = ids_by_path(client)["fox1.png"]
+    (library / "fox1.png").write_bytes(golden_png()[:100])
+    r = client.get(f"/api/images/{file_id}/stripped")
+    assert r.status_code == 422 and r.json()["error"]["code"] == "cannot_strip"
+    (library / "fox1.png").unlink()
+    assert client.get(f"/api/images/{file_id}/stripped").status_code == 404
+
+
 @pytest.mark.parametrize(
     "path",
     [
         "/api/images/999/file",
+        "/api/images/999/stripped",
         "/api/images/abc/file",
         "/api/images/..%2F..%2Fetc%2Fpasswd/file",
         "/api/images/1%2F..%2F..%2Fsecret/file",

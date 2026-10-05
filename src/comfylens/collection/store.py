@@ -28,7 +28,9 @@ from comfylens.db.connection import connect, transaction
 Role = Literal["reference", "attempt"]
 OriginalFormat = Literal["png", "jpeg", "webp"]
 
-HASH = re.compile(r"[0-9a-f]{32}")
+# A content hash: xxh3-128 as 32 lowercase hex digits. Thumbnails and originals are named by it.
+HASH_RE = r"[0-9a-f]{32}"
+HASH = re.compile(HASH_RE)
 EXTENSIONS: dict[str, str] = {"png": "png", "jpeg": "jpg", "webp": "webp"}
 MAX_TITLE = 200
 MAX_TAG = 40

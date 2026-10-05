@@ -3,14 +3,14 @@ import { useState } from "react";
 import type { DistinctPrompt, PromptGroup } from "../../api/types";
 import { fmtInt, fmtPct } from "../../lib/format";
 import { useUi } from "../../state/ui";
-import { CopyButton } from "../ui";
+import { CopyButton, Heading } from "../ui";
 
 const SHOWN = 3;
 
 function Entry({ prompt, counted }: { prompt: DistinctPrompt; counted: boolean }) {
   const [full, setFull] = useState(false);
   return (
-    <li className="rounded border border-zinc-200 p-1.5 dark:border-zinc-800">
+    <li className="rounded border border-line p-1.5">
       <div className="flex items-start gap-2">
         <button
           type="button"
@@ -23,7 +23,7 @@ function Entry({ prompt, counted }: { prompt: DistinctPrompt; counted: boolean }
         <CopyButton label="Copy prompt" text={prompt.text} />
       </div>
       {counted && (
-        <div className="mt-0.5 text-zinc-500 tabular-nums">
+        <div className="mt-0.5 text-muted tabular-nums">
           {fmtInt(prompt.count)} images ({fmtPct(prompt.share)})
         </div>
       )}
@@ -39,16 +39,16 @@ function Side({ title, group }: { title: string; group: PromptGroup | undefined 
   return (
     <div className="mb-3 text-xs">
       <div className="mb-0.5 flex items-baseline gap-2">
-        <span className="font-semibold text-zinc-500">{title}</span>
+        <span className="font-semibold text-muted">{title}</span>
         {several && (
           <>
-            <span className="text-zinc-500">
+            <span className="text-muted">
               {fmtInt(Math.min(SHOWN, prompts.length))} of {fmtInt(group.distinct_total)} distinct
             </span>
             <button
               type="button"
               onClick={() => setTab("prompts")}
-              className="text-sky-600 hover:underline dark:text-sky-400"
+              className="text-link hover:underline"
             >
               All in Prompts
             </button>
@@ -78,8 +78,8 @@ export default function PromptSummary({
   if (status && !positive)
     return (
       <div className="mb-3 text-xs">
-        <div className="mb-0.5 font-semibold text-zinc-500">Prompt</div>
-        <div className="text-zinc-500">{status}</div>
+        <Heading>Prompt</Heading>
+        <div className="text-muted">{status}</div>
       </div>
     );
   return (

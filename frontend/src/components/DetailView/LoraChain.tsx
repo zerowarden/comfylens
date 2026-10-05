@@ -8,9 +8,7 @@ function Box({ children, muted = false }: { children: ReactNode; muted?: boolean
   return (
     <span
       className={`rounded border px-1.5 py-0.5 break-all ${
-        muted
-          ? "border-zinc-300 text-zinc-500 dark:border-zinc-700"
-          : "border-sky-500/50 bg-sky-500/10"
+        muted ? "border-control text-muted" : "border-accent/50 bg-accent/10"
       }`}
     >
       {children}
@@ -19,7 +17,7 @@ function Box({ children, muted = false }: { children: ReactNode; muted?: boolean
 }
 
 function ChainLink() {
-  return <Glyph name="link" label="chained to" className="size-3 text-zinc-500" />;
+  return <Glyph name="link" label="chained to" className="size-3 text-muted" />;
 }
 
 /**
@@ -46,7 +44,7 @@ export default function LoraChain({ detail }: { detail: ImageDetail }) {
             <span key={`${l.node_id}:${l.entry}`} className="flex items-center gap-1">
               <ChainLink />
               <Box>
-                {l.name} <span className="text-zinc-500">({strengthLabel(l)})</span>
+                {l.name} <span className="text-muted">({strengthLabel(l)})</span>
               </Box>
             </span>
           ))}
@@ -59,18 +57,18 @@ export default function LoraChain({ detail }: { detail: ImageDetail }) {
         </div>
       ))}
       {disabled.length > 0 && (
-        <div className="text-zinc-500">
+        <div className="text-muted">
           Switched off: {disabled.map((l) => `${l.name} (${l.entry || l.node_id})`).join(", ")}
         </div>
       )}
       {unused.length > 0 && (
         <div>
-          <div className="font-semibold text-amber-600">Unused LoRAs</div>
+          <div className="font-semibold text-warning">Unused LoRAs</div>
           <ul className="space-y-0.5">
             {unused.map((l) => (
               <li key={`${l.node_id}:${l.entry}`}>
                 node {l.node_id}: {l.name} ({strengthLabel(l)})
-                <span className="text-zinc-500">
+                <span className="text-muted">
                   {" "}
                   — {warningFor(l.node_id)?.message ?? "not connected to any sampler"}
                 </span>

@@ -1,10 +1,14 @@
 """Server state shared by every route: the library, its snapshot and the background indexer."""
 
+import json
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import polars as pl
@@ -40,6 +44,32 @@ class ApiError(Exception):
 
 def error_response(status: int, code: str, message: str, **extra: object) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}, **extra}, status_code=status)
+
+
+def not_found(what: str, raw_id: object) -> ApiError:
+    return ApiError(404, "not_found", f"no {what} with id {raw_id!r}")
+
+
+def parse_id(raw_id: str, what: str) -> int:
+    """Ids are parsed here rather than by FastAPI: anything malformed is a plain 404."""
+    if not raw_id.isdigit():
+        raise not_found(what, raw_id)
+    return int(raw_id)
+
+
+def _no_catalog() -> ApiError:
+    return ApiError(503, "no_catalog", "the library has not been indexed yet")
+
+
+def stored_json(text: str | None) -> Any:
+    """A JSON document from the catalog or collection, or None when there is none."""
+    # stdlib json accepts NaN; Pydantic then serializes it as null.
+    return json.loads(text) if text else None
+
+
+MEDIA_TYPES = {"png": "image/png", "jpeg": "image/jpeg", "webp": "image/webp"}
+# Thumbnails and collection originals are named by content hash, so they never change.
+IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 class Server:
@@ -165,7 +195,7 @@ class Server:
 
     def _edit_connection(self) -> sqlite3.Connection:
         if not self.catalog.is_file():
-            raise ApiError(503, "no_catalog", "the library has not been indexed yet")
+            raise _no_catalog()
         return connect(self.catalog, timeout=_EDIT_BUSY_TIMEOUT)
 
     def _index_again_if_running(self) -> None:
@@ -179,7 +209,22 @@ class Server:
         try:
             return connect_readonly(self.catalog)
         except CatalogMissing as e:
-            raise ApiError(503, "no_catalog", "the library has not been indexed yet") from e
+            raise _no_catalog() from e
+
+    @contextmanager
+    def reading(self) -> Iterator[sqlite3.Connection]:
+        """A read-only catalog connection for the block, closed after it."""
+        conn = self.connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def file_gone(self) -> ApiError:
+        """The error for a catalogued file that is no longer on disk; queues an index run, since
+        the catalog is behind the library."""
+        self.request_index()
+        return ApiError(404, "file_missing", "the file is no longer on disk")
 
     def search(self, text: str) -> set[int]:
         """Files whose positive or negative prompt contains `text` (FTS5 phrase, else LIKE)."""

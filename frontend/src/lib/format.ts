@@ -55,3 +55,8 @@ export function scopeSentence(scope: ScopeInfo): string {
   const { main, notes } = scopeParts(scope);
   return notes ? `${main} (${notes})` : main;
 }
+
+/** What a pending query shows: its error, or that it is still loading. */
+export function loadingText(error: Error | null): string {
+  return error ? error.message : "Loading…";
+}

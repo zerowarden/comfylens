@@ -1,0 +1,150 @@
+/*
+ * The colour palette, in one place: edit a value here and every component follows.
+ *
+ * `:root` is the light theme and `:root.dark` the dark one; the toggle in the top bar adds or
+ * removes the `dark` class on <html>. Each token is a Tailwind colour (see index.css), so it is
+ * used as `bg-canvas`, `text-muted`, `border-line`, `fill-heat-2` and so on, with opacity
+ * modifiers such as `bg-accent/15` working as usual. Charts read the same variables.
+ *
+ * To add a token: give it a value in both blocks below, then map it in index.css's `@theme inline`.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --canvas: #ffffff; /* page and dialog background */
+  --surface: #ffffff; /* menus, popovers, tooltips, select options */
+  --subtle: #f4f4f5; /* prompt boxes, chips, tile placeholders */
+  --hover: #f4f4f5; /* hover and focus highlight of rows and buttons */
+  --track: #e4e4e7; /* empty part of progress and share bars */
+  --stage: #000000; /* behind full-size images */
+
+  /* Borders */
+  --line: #e4e4e7; /* dividers between regions and sections */
+  --control: #d4d4d8; /* buttons, inputs, popover edges */
+
+  /* Text */
+  --fg: #18181b; /* body text */
+  --soft: #52525b; /* secondary text that still reads as content */
+  --muted: #71717a; /* labels, captions, counts */
+  --faint: #a1a1aa; /* disabled or unreachable */
+
+  /* Accent */
+  --accent: #0ea5e9; /* selection, active state, focus rings, bars */
+  --accent-text: #0369a1; /* text on an accent-tinted background */
+  --link: #0284c7; /* links and clickable values */
+  --primary: #0284c7; /* filled confirm buttons */
+  --primary-hover: #0369a1;
+  --on-primary: #ffffff; /* text on primary and destructive buttons */
+
+  /* Status */
+  --danger: #dc2626;
+  --destructive: #dc2626; /* filled delete buttons */
+  --destructive-hover: #b91c1c;
+  --success: #059669;
+  --warning: #d97706;
+
+  /* Overlays */
+  --scrim: #000000; /* behind dialogs, used at 40-50% opacity */
+  --overlay: #000000; /* chips and rings drawn over images */
+  --on-overlay: #ffffff;
+  --on-stage: #a1a1aa; /* text on the --stage background */
+  --on-warning: #000000; /* text on a warning badge */
+
+  /* Model families, in hash order; --family-none is files without metadata. Shared by both
+     themes: the dark block does not override them. */
+  --family-0: #4e79a7;
+  --family-1: #f28e2b;
+  --family-2: #59a14f;
+  --family-3: #e15759;
+  --family-4: #b07aa1;
+  --family-5: #76b7b2;
+  --family-6: #edc948;
+  --family-7: #ff9da7;
+  --family-8: #9c755f;
+  --family-9: #bab0ac;
+  --family-none: #6b7280;
+
+  /* Timeline heat scale, empty to busiest */
+  --heat-0: rgb(228 228 231 / 0.7);
+  --heat-1: #bae6fd;
+  --heat-2: #7dd3fc;
+  --heat-3: #0ea5e9;
+  --heat-4: #0369a1;
+
+  /* Range plot in the analysis tables */
+  --range-axis: #a1a1aa; /* min to max line and end ticks */
+  --range-box: rgb(34 197 94 / 0.4); /* interquartile box */
+  --range-median: #dc2626; /* median marker */
+
+  /* Charts */
+  --chart-text: #52525b;
+  --chart-line: #d4d4d8;
+  --chart-bar: #0ea5e9;
+
+  /* Theme toggle */
+  --toggle-track: #333333;
+  --toggle-knob: #ffffff;
+  --toggle-icon: #18181b;
+
+  --scrollbar: rgb(113 113 122 / 0.5);
+}
+
+:root.dark {
+  color-scheme: dark;
+
+  --canvas: #09090b;
+  --surface: #18181b;
+  --subtle: #18181b;
+  --hover: #27272a;
+  --track: #27272a;
+  --stage: #000000;
+
+  --line: #27272a;
+  --control: #3f3f46;
+
+  --fg: #f4f4f5;
+  --soft: #a1a1aa;
+  --muted: #71717a;
+  --faint: #52525b;
+
+  --accent: #0ea5e9;
+  --accent-text: #7dd3fc;
+  --link: #38bdf8;
+  --primary: #0284c7;
+  --primary-hover: #0369a1;
+  --on-primary: #ffffff;
+
+  --danger: #f87171;
+  --destructive: #dc2626;
+  --destructive-hover: #b91c1c;
+  --success: #34d399;
+  --warning: #fbbf24;
+
+  --scrim: #000000;
+  --overlay: #000000;
+  --on-overlay: #ffffff;
+  --on-stage: #a1a1aa;
+  --on-warning: #000000;
+
+  --heat-0: rgb(39 39 42 / 0.7);
+  --heat-1: #0c4a6e;
+  --heat-2: #0369a1;
+  --heat-3: #0ea5e9;
+  --heat-4: #7dd3fc;
+
+  --range-axis: #71717a;
+  --range-box: rgb(34 197 94 / 0.35);
+  --range-median: #f87171;
+
+  --chart-text: #a1a1aa;
+  --chart-line: #3f3f46;
+  --chart-bar: #0ea5e9;
+
+  --toggle-track: #ffffff;
+  --toggle-knob: #000000;
+  --toggle-icon: #ffffff;
+
+  --scrollbar: rgb(113 113 122 / 0.5);
+}

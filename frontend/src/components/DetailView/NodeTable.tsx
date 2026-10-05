@@ -24,13 +24,11 @@ export default function NodeTable({ nodes }: { nodes: DetailNode[] }) {
         </thead>
         <tbody>
           {nodes.map((n) => (
-            <tr key={n.id} className={n.reachable ? "" : "text-zinc-400 dark:text-zinc-600"}>
+            <tr key={n.id} className={n.reachable ? "" : "text-faint"}>
               <td className={`${td} font-mono`}>{n.id}</td>
               <td className={td}>
                 {n.class_type}
-                {n.title && n.title !== n.class_type && (
-                  <div className="text-zinc-500">{n.title}</div>
-                )}
+                {n.title && n.title !== n.class_type && <div className="text-muted">{n.title}</div>}
                 {!n.reachable && <div>unreachable</div>}
               </td>
               <td className={`${td} font-mono break-all`}>{summarize(n.inputs)}</td>

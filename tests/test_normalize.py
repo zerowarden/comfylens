@@ -8,6 +8,7 @@ from comfylens.extract.normalize import (
     model_stem,
     prompt_ws,
     round_key,
+    size_facts,
 )
 
 STEP = re.compile(r"^(?P<base>.+?)[_-](?P<step>\d{6,})$")
@@ -68,3 +69,16 @@ def test_aspect(size, expected):
 
 def test_prompt_ws():
     assert prompt_ws("  a\t\tb  c\r\nd  ") == "a b c\nd"
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "expected"),
+    [
+        (832, 1216, {"megapixels": 1.012, "aspect": 0.684, "aspect_label": "2:3"}),
+        (1024, 1024, {"megapixels": 1.049, "aspect": 1.0, "aspect_label": "1:1"}),
+        (None, 1024, {"megapixels": None, "aspect": None, "aspect_label": None}),
+        (1024, 0, {"megapixels": None, "aspect": None, "aspect_label": None}),
+    ],
+)
+def test_size_facts(width, height, expected):
+    assert size_facts(width, height) == expected

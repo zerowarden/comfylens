@@ -81,8 +81,3 @@ def loras_frame(conn: sqlite3.Connection) -> pl.DataFrame:
         " FROM loras s WHERE s.file_id = loras.file_id AND s.node_id = loras.node_id"
         " AND s.entry = loras.entry)",
     )
-
-
-def dedupe_ids(files: pl.DataFrame) -> pl.Series:
-    """The lowest file id per content hash, for dedupe_identical_files."""
-    return files.group_by("content_hash").agg(pl.col("id").min())["id"]

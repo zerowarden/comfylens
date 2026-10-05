@@ -1,6 +1,9 @@
 import { useState, type ReactNode } from "react";
 
+import { thumbUrl } from "../api/client";
+import { familyColor } from "../lib/colors";
 import { copyText } from "../lib/hooks";
+import { useThumbnailFailure } from "../lib/images";
 import { Glyph } from "./icons";
 
 export function Button({
@@ -8,6 +11,7 @@ export function Button({
   onClick,
   active = false,
   disabled = false,
+  ghost = false,
   title,
   ariaLabel,
   className = "",
@@ -16,6 +20,8 @@ export function Button({
   onClick?: () => void;
   active?: boolean;
   disabled?: boolean;
+  /** No border until hovered: for icon actions that sit beside content. */
+  ghost?: boolean;
   title?: string;
   ariaLabel?: string;
   className?: string;
@@ -27,10 +33,10 @@ export function Button({
       aria-label={ariaLabel}
       disabled={disabled}
       onClick={onClick}
-      className={`rounded border px-2 py-0.5 text-xs transition-colors disabled:opacity-40 ${
+      className={`${BUTTON} disabled:opacity-40 ${
         active
-          ? "border-sky-500 bg-sky-500/15 text-sky-700 dark:text-sky-300"
-          : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          ? "border-accent bg-accent/15 text-accent-text"
+          : `${ghost ? "border-transparent" : "border-control"} hover:bg-hover`
       } ${className}`}
     >
       {children}
@@ -48,16 +54,14 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="inline-flex overflow-hidden rounded border border-zinc-300 dark:border-zinc-700">
+    <div className="inline-flex overflow-hidden rounded border border-control">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
           className={`px-2 py-0.5 text-xs ${
-            o.value === value
-              ? "bg-sky-500/20 text-sky-700 dark:text-sky-300"
-              : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            o.value === value ? "bg-accent/20 text-accent-text" : "hover:bg-hover"
           }`}
         >
           {o.label}
@@ -94,7 +98,7 @@ export function Collapsible({
     else setOwn(next);
   };
   return (
-    <section className="border-b border-zinc-200 dark:border-zinc-800">
+    <section className="border-b border-line">
       <div className="flex items-center gap-2 px-3 py-2">
         <button
           type="button"
@@ -103,7 +107,7 @@ export function Collapsible({
         >
           <Glyph
             name="chevronRight"
-            className={`size-3.5 text-zinc-500 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+            className={`size-3.5 text-muted transition-transform duration-150 ${open ? "rotate-90" : ""}`}
           />
           {title}
         </button>
@@ -118,9 +122,9 @@ export function Collapsible({
 
 export function ShareBar({ share }: { share: number }) {
   return (
-    <div className="h-1.5 w-full rounded bg-zinc-200 dark:bg-zinc-800">
+    <div className="h-1.5 w-full rounded bg-track">
       <div
-        className="h-1.5 rounded bg-sky-500"
+        className="h-1.5 rounded bg-accent"
         style={{ width: `${Math.min(100, share * 100)}%` }}
       />
     </div>
@@ -129,8 +133,8 @@ export function ShareBar({ share }: { share: number }) {
 
 const COPY_STATE = {
   idle: { icon: "copy", suffix: "", className: "" },
-  done: { icon: "check", suffix: ": copied", className: "text-emerald-600 dark:text-emerald-400" },
-  failed: { icon: "circleAlert", suffix: ": failed", className: "text-red-600 dark:text-red-400" },
+  done: { icon: "check", suffix: ": copied", className: "text-success" },
+  failed: { icon: "circleAlert", suffix: ": failed", className: "text-danger" },
 } as const;
 
 /**
@@ -150,6 +154,7 @@ export function CopyButton({
   const look = COPY_STATE[state];
   return (
     <Button
+      ghost
       title={label + look.suffix}
       ariaLabel={label + look.suffix}
       className={`inline-flex items-center gap-1 ${children ? "" : "px-1"}`}
@@ -174,7 +179,7 @@ export function CloseButton({ onClick }: { onClick: () => void }) {
       title="Close (Esc)"
       aria-label="Close"
       onClick={onClick}
-      className="rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+      className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
     >
       <Glyph name="x" className="size-4" />
     </button>
@@ -197,19 +202,79 @@ export function FilterLink({
       type="button"
       title={title}
       onClick={onClick}
-      className="text-left break-words hover:text-sky-600 hover:underline dark:hover:text-sky-400"
+      className="text-left break-words hover:text-link hover:underline"
     >
       {children}
     </button>
   );
 }
 
-export function Message({ children }: { children: ReactNode }) {
-  return <div className="px-3 py-6 text-center text-zinc-500">{children}</div>;
+/** A model family's colour swatch (see --family-* in theme.css). */
+export function FamilyDot({
+  family,
+  large = false,
+  className = "",
+  title,
+}: {
+  family: string | null | undefined;
+  large?: boolean;
+  className?: string;
+  title?: string;
+}) {
+  return (
+    <span
+      className={`inline-block shrink-0 rounded-full ${large ? "size-2.5" : "size-2"} ${className}`}
+      style={{ background: familyColor(family) }}
+      title={title}
+    />
+  );
 }
 
-/** A filled action button; add a border and background color. */
-export const PRIMARY =
-  "rounded border px-2 py-0.5 text-xs font-medium text-white disabled:opacity-40";
-export const th = "px-1.5 py-1 text-left font-medium text-zinc-500";
+/** A thumbnail filling its box; `fallback` stands in when there is none or it fails to load. */
+export function Thumbnail({
+  hash,
+  fallback = null,
+  draggable,
+}: {
+  hash: string | null | undefined;
+  fallback?: ReactNode;
+  draggable?: boolean;
+}) {
+  const [failed, onError] = useThumbnailFailure();
+  if (!hash || failed) return fallback;
+  return (
+    <img
+      src={thumbUrl(hash)}
+      loading="lazy"
+      decoding="async"
+      draggable={draggable}
+      onError={onError}
+      alt=""
+      className="h-full w-full object-contain"
+    />
+  );
+}
+
+export function Message({ children }: { children: ReactNode }) {
+  return <div className="px-3 py-6 text-center text-muted">{children}</div>;
+}
+
+/** The small caption above a block of panel or detail content. */
+export function Heading({ children }: { children: ReactNode }) {
+  return <div className="mb-0.5 text-xs font-semibold text-muted">{children}</div>;
+}
+
+const BUTTON = "rounded border px-2 py-0.5 text-xs transition-colors";
+/** A link styled as an outlined `Button`. */
+export const LINK_BUTTON = `${BUTTON} border-control hover:bg-hover`;
+const FILLED = `${BUTTON} font-medium text-on-primary disabled:opacity-40`;
+/** A filled confirm button. */
+export const PRIMARY = `${FILLED} border-primary bg-primary hover:bg-primary-hover`;
+/** A filled delete button. */
+export const DESTRUCTIVE = `${FILLED} border-destructive bg-destructive hover:bg-destructive-hover`;
+/** Text inputs and selects; add size and spacing. */
+export const FIELD = "rounded border border-control bg-transparent";
+/** A form field that highlights its border while focused. */
+export const FOCUS_FIELD = `${FIELD} text-fg outline-none focus:border-accent`;
+export const th = "px-1.5 py-1 text-left font-medium text-muted";
 export const td = "px-1.5 py-1 align-top";

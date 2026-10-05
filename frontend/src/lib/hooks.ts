@@ -43,3 +43,11 @@ export function useElementWidth(element: HTMLElement | null): number {
 export async function copyText(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }
+
+/**
+ * Keys pressed inside a menu or dialog stop here: the grid, detail and Compare views listen on the
+ * window, and must not clear the selection or close themselves on its Escape or Enter.
+ */
+export function keepKeys(e: { stopPropagation: () => void }) {
+  e.stopPropagation();
+}

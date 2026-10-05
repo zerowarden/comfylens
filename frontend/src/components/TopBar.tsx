@@ -6,6 +6,7 @@ import type { IndexStatusModel, LibraryInfo } from "../api/types";
 import { fmtInt } from "../lib/format";
 import { indexPollInterval, runLanded } from "../lib/indexing";
 import { useUi } from "../state/ui";
+import ThemeToggle from "./ThemeToggle";
 import { Button, Segmented } from "./ui";
 
 /** Poll the indexer, and refresh all data once a run lands. */
@@ -54,19 +55,19 @@ function Progress({ status }: { status: IndexStatusModel }) {
   if (status.state === "idle") return null;
   const share = status.total > 0 ? status.done / status.total : 0;
   return (
-    <div className="flex items-center gap-2 text-xs text-zinc-500">
+    <div className="flex items-center gap-2 text-xs text-muted">
       <span className="capitalize">{status.state}</span>
       {status.state === "processing" && (
         <>
-          <div className="h-1.5 w-40 rounded bg-zinc-200 dark:bg-zinc-800">
-            <div className="h-1.5 rounded bg-sky-500" style={{ width: `${share * 100}%` }} />
+          <div className="h-1.5 w-40 rounded bg-track">
+            <div className="h-1.5 rounded bg-accent" style={{ width: `${share * 100}%` }} />
           </div>
           <span className="tabular-nums">
             {fmtInt(status.done)} / {fmtInt(status.total)}
           </span>
         </>
       )}
-      {status.errors > 0 && <span className="text-amber-600">{fmtInt(status.errors)} errors</span>}
+      {status.errors > 0 && <span className="text-warning">{fmtInt(status.errors)} errors</span>}
     </div>
   );
 }
@@ -74,12 +75,6 @@ function Progress({ status }: { status: IndexStatusModel }) {
 export default function TopBar() {
   const queryClient = useQueryClient();
   const { status, library } = useIndexStatus();
-  const pool = useUi((s) => s.pool);
-  const setPool = useUi((s) => s.setPool);
-  const theme = useUi((s) => s.theme);
-  const toggleTheme = useUi((s) => s.toggleTheme);
-  const sidebarOpen = useUi((s) => s.sidebarOpen);
-  const setSidebarOpen = useUi((s) => s.setSidebarOpen);
   const panelOpen = useUi((s) => s.panelOpen);
   const setPanelOpen = useUi((s) => s.setPanelOpen);
   const view = useUi((s) => s.view);
@@ -102,14 +97,7 @@ export default function TopBar() {
 
   const running = status !== undefined && status.state !== "idle";
   return (
-    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-zinc-200 px-3 dark:border-zinc-800">
-      <Button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        title="Toggle filters"
-        disabled={view !== "library"}
-      >
-        ☰
-      </Button>
+    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
       <span className="font-semibold">ComfyLens</span>
       <Segmented
         value={view}
@@ -119,15 +107,15 @@ export default function TopBar() {
         ]}
         onChange={setView}
       />
-      <span className="min-w-0 truncate font-mono text-xs text-zinc-500" title={library?.root}>
+      <span className="min-w-0 truncate font-mono text-xs text-muted" title={library?.root}>
         {library?.root}
       </span>
       {library && (
-        <span className="text-xs text-zinc-500 tabular-nums">{fmtInt(library.total)} files</span>
+        <span className="text-xs text-muted tabular-nums">{fmtInt(library.total)} files</span>
       )}
       {library?.watching && (
         <span
-          className="flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-700 dark:text-emerald-300"
+          className="flex items-center gap-1 rounded bg-success/15 px-1.5 py-0.5 text-xs text-success"
           title="Watching the library: new and changed files are indexed automatically"
         >
           <span aria-hidden="true">●</span> watching
@@ -135,7 +123,7 @@ export default function TopBar() {
       )}
       {library && library.timestamp_suspect > 0 && (
         <span
-          className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-300"
+          className="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning"
           title="Files whose modification times look like a bulk copy rather than generation"
         >
           {fmtInt(library.timestamp_suspect)} suspect timestamps
@@ -144,31 +132,20 @@ export default function TopBar() {
       <div className="flex-1" />
       {status && <Progress status={status} />}
       {status?.last_error && !running && (
-        <span className="max-w-64 truncate text-xs text-red-600" title={status.last_error}>
+        <span className="max-w-64 truncate text-xs text-danger" title={status.last_error}>
           {status.last_error}
         </span>
       )}
-      {notice && <span className="text-xs text-amber-600">{notice}</span>}
+      {notice && <span className="text-xs text-warning">{notice}</span>}
       <Button onClick={() => rescan.mutate()} disabled={running || rescan.isPending}>
         Rescan
-      </Button>
-      {view === "library" && (
-        <Button
-          active={pool}
-          onClick={() => setPool(!pool)}
-          title="Compute one group across families"
-        >
-          Pool families
-        </Button>
-      )}
-      <Button onClick={toggleTheme} title="Toggle theme">
-        {theme === "dark" ? "Light" : "Dark"}
       </Button>
       {view === "library" && (
         <Button onClick={() => setPanelOpen(!panelOpen)} title="Toggle analysis panel">
           Analysis
         </Button>
       )}
+      <ThemeToggle />
     </header>
   );
 }

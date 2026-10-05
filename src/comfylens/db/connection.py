@@ -49,6 +49,14 @@ def transaction(conn: sqlite3.Connection) -> Iterator[None]:
     conn.execute("COMMIT")
 
 
+def is_stale(conn: sqlite3.Connection, config_hash: str) -> bool:
+    """Whether the catalog was extracted by another extractor version or another config."""
+    return (
+        get_meta(conn, "extractor_version") != str(version.EXTRACTOR_VERSION)
+        or get_meta(conn, "config_hash") != config_hash
+    )
+
+
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
     try:
         row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
@@ -101,11 +109,7 @@ def open_catalog(path: Path, root: Path, config_hash: str) -> Catalog:
         except sqlite3.DatabaseError:
             schema = None  # not a readable database: rebuild below
         if conn is not None and schema == str(version.SCHEMA_VERSION):
-            stale = (
-                get_meta(conn, "extractor_version") != str(version.EXTRACTOR_VERSION)
-                or get_meta(conn, "config_hash") != config_hash
-            )
-            return Catalog(conn, path, created=False, stale=stale)
+            return Catalog(conn, path, created=False, stale=is_stale(conn, config_hash))
         if conn is not None:
             conn.close()
         for suffix in ("", "-wal", "-shm"):

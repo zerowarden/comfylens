@@ -3,9 +3,9 @@ import { useMemo, useState } from "react";
 
 import { api } from "../../api/client";
 import type { NodeInputKey } from "../../api/types";
-import { fmtInt, fmtNum } from "../../lib/format";
+import { fmtInt, fmtNum, loadingText } from "../../lib/format";
 import { useScope } from "../../lib/scope";
-import { Message, td, th } from "../ui";
+import { FIELD, Message, td, th } from "../ui";
 import CategoricalTable from "./Categorical";
 import FamilySections from "./FamilySections";
 import { modeText, rangeText } from "./format";
@@ -22,7 +22,7 @@ function KeyStats({ chosen }: { chosen: NodeInputKey }) {
       api.nodeStats({ ...scope, class_type: chosen.class_type, input_name: chosen.input_name }),
     placeholderData: keepPreviousData,
   });
-  if (!query.data) return <Message>{query.isError ? query.error.message : "Loading…"}</Message>;
+  if (!query.data) return <Message>{loadingText(query.error)}</Message>;
   return (
     <FamilySections groups={query.data.groups} count={(g) => g.files}>
       {(group) => (
@@ -54,7 +54,7 @@ function KeyStats({ chosen }: { chosen: NodeInputKey }) {
           )}
           {group.categorical && <CategoricalTable title="Values" data={group.categorical} />}
           {group.n_unique !== null && (
-            <div className="text-xs text-zinc-500">
+            <div className="text-xs text-muted">
               {fmtInt(group.n_unique)} distinct values (long text: values not listed)
             </div>
           )}
@@ -85,28 +85,26 @@ export default function Advanced() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search class_type.input_name"
-          className="w-full rounded border border-zinc-300 bg-transparent px-2 py-1 dark:border-zinc-700"
+          className={`w-full px-2 py-1 ${FIELD}`}
         />
       </div>
-      <div className="max-h-64 overflow-y-auto border-y border-zinc-200 dark:border-zinc-800">
-        {!keys.data && <Message>{keys.isError ? keys.error.message : "Loading…"}</Message>}
+      <div className="max-h-64 overflow-y-auto border-y border-line">
+        {!keys.data && <Message>{loadingText(keys.error)}</Message>}
         <ul className="text-xs">
           {matching.slice(0, 300).map((k) => (
             <li key={`${keyOf(k)}:${k.kind}`}>
               <button
                 type="button"
                 onClick={() => setChosen(k)}
-                className={`flex w-full gap-2 px-3 py-0.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-900 ${
+                className={`flex w-full gap-2 px-3 py-0.5 text-left hover:bg-hover ${
                   chosen && keyOf(chosen) === keyOf(k) && chosen.kind === k.kind
-                    ? "bg-sky-500/10"
+                    ? "bg-accent/10"
                     : ""
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate font-mono">{keyOf(k)}</span>
-                <span className="text-zinc-500">{k.kind}</span>
-                <span className="w-14 text-right text-zinc-500 tabular-nums">
-                  {fmtInt(k.files)}
-                </span>
+                <span className="text-muted">{k.kind}</span>
+                <span className="w-14 text-right text-muted tabular-nums">{fmtInt(k.files)}</span>
               </button>
             </li>
           ))}

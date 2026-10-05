@@ -1,7 +1,7 @@
 import type { Categorical } from "../../api/types";
 import { fmtInt, fmtPct } from "../../lib/format";
 import { ChainText } from "../icons";
-import { FilterLink, ShareBar, td } from "../ui";
+import { FilterLink, Heading, ShareBar, td } from "../ui";
 
 /** A frequency table: top values with count and share, then the other and missing buckets. */
 export default function CategoricalTable({
@@ -20,7 +20,7 @@ export default function CategoricalTable({
   const total = data.n + data.missing;
   return (
     <div className="mb-3">
-      <div className="mb-0.5 text-xs font-semibold text-zinc-500">{title}</div>
+      <Heading>{title}</Heading>
       <table className="w-full text-xs">
         <tbody>
           {data.values.map((v) => (
@@ -34,19 +34,19 @@ export default function CategoricalTable({
                 <ShareBar share={v.share} />
               </td>
               <td className={`${td} text-right whitespace-nowrap tabular-nums`}>
-                {fmtInt(v.count)} <span className="text-zinc-500">{fmtPct(v.share)}</span>
+                {fmtInt(v.count)} <span className="text-muted">{fmtPct(v.share)}</span>
               </td>
             </tr>
           ))}
           {data.other > 0 && (
-            <tr className="text-zinc-500">
+            <tr className="text-muted">
               <td className={td}>other</td>
               <td className={td} />
               <td className={`${td} text-right tabular-nums`}>{fmtInt(data.other)}</td>
             </tr>
           )}
           {data.missing > 0 && (
-            <tr className="text-zinc-500">
+            <tr className="text-muted">
               <td className={td}>missing</td>
               <td className={td} />
               <td className={`${td} text-right tabular-nums`}>

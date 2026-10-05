@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { Histogram, NumericStats } from "../../api/types";
-import { axisColors, type EChartsOption } from "../../lib/echarts";
+import { chartColors, type EChartsOption } from "../../lib/echarts";
 import { fmtInt, fmtNum } from "../../lib/format";
 import { useUi } from "../../state/ui";
 import Chart from "../Chart";
@@ -13,18 +13,17 @@ function barLabel(bar: { x0: number; x1: number }, kind: Histogram["kind"]): str
 }
 
 /**
- * Min to max as a whisker, the interquartile range as a bar and the median as a tick, on the
- * field's own scale.
+ * Min to max as an axis, the interquartile range as a shaded box and the median as a marker with
+ * its value above, on the field's own scale. Colours are the range tokens in theme.css.
  */
 export function RangePlot({ stats }: { stats: NumericStats }) {
   const { min, p25, median, p75, max } = stats;
   if (min === null || max === null) return null;
-  const w = 64;
-  const h = 14;
-  const pad = 2;
-  const mid = h / 2;
-  const x = (v: number | null) =>
-    v === null || max === min ? w / 2 : pad + ((v - min) / (max - min)) * (w - 2 * pad);
+  const w = 96;
+  const h = 30;
+  const pad = 5;
+  const axis = 22;
+  const x = (v: number) => (max === min ? w / 2 : pad + ((v - min) / (max - min)) * (w - 2 * pad));
   const title = [
     `min ${fmtNum(min)}`,
     p25 !== null && `p25 ${fmtNum(p25)}`,
@@ -34,36 +33,33 @@ export function RangePlot({ stats }: { stats: NumericStats }) {
   ]
     .filter(Boolean)
     .join(", ");
+  const xm = median === null ? null : x(median);
+  // Keep the median's label inside the plot near either end.
+  const anchor = xm === null ? "middle" : xm < 14 ? "start" : xm > w - 14 ? "end" : "middle";
   return (
-    <svg width={w} height={h} role="img" aria-label={title}>
+    <svg width={w} height={h} role="img" aria-label={title} className="block">
       <title>{title}</title>
-      {max === min ? (
-        <circle cx={w / 2} cy={mid} r={2.5} className="fill-sky-500" />
-      ) : (
+      {p25 !== null && p75 !== null && max !== min && (
+        <rect
+          x={x(p25)}
+          y={11}
+          width={Math.max(2, x(p75) - x(p25))}
+          height={h - 12}
+          className="fill-range-box"
+        />
+      )}
+      <line x1={pad} x2={w - pad} y1={axis} y2={axis} className="stroke-range-axis" />
+      <line x1={pad} x2={pad} y1={axis - 3} y2={axis + 3} className="stroke-range-axis" />
+      <line x1={w - pad} x2={w - pad} y1={axis - 3} y2={axis + 3} className="stroke-range-axis" />
+      {xm !== null && median !== null && (
         <>
-          <line x1={x(min)} x2={x(max)} y1={mid} y2={mid} className="stroke-zinc-400" />
-          <line x1={x(min)} x2={x(min)} y1={mid - 3} y2={mid + 3} className="stroke-zinc-400" />
-          <line x1={x(max)} x2={x(max)} y1={mid - 3} y2={mid + 3} className="stroke-zinc-400" />
-          {p25 !== null && p75 !== null && (
-            <rect
-              x={x(p25)}
-              y={mid - 3.5}
-              width={Math.max(1.5, x(p75) - x(p25))}
-              height={7}
-              rx={1}
-              className="fill-sky-500/40 stroke-sky-500"
-            />
-          )}
-          {median !== null && (
-            <line
-              x1={x(median)}
-              x2={x(median)}
-              y1={mid - 4.5}
-              y2={mid + 4.5}
-              strokeWidth={2}
-              className="stroke-zinc-900 dark:stroke-zinc-100"
-            />
-          )}
+          <polygon
+            points={`${xm},${axis - 7} ${xm - 4},${axis + 1} ${xm + 4},${axis + 1}`}
+            className="fill-range-median"
+          />
+          <text x={xm} y={8} textAnchor={anchor} className="fill-fg text-[9px] tabular-nums">
+            {fmtNum(median)}
+          </text>
         </>
       )}
     </svg>
@@ -71,10 +67,11 @@ export function RangePlot({ stats }: { stats: NumericStats }) {
 }
 
 export function HistogramChart({ histogram }: { histogram: Histogram }) {
-  const dark = useUi((s) => s.theme === "dark");
+  const theme = useUi((s) => s.theme);
   const option = useMemo<EChartsOption>(() => {
-    const colors = axisColors(dark);
+    const colors = chartColors();
     return {
+      darkMode: theme === "dark",
       animation: false,
       grid: { left: 40, right: 8, top: 8, bottom: 40 },
       tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
@@ -89,10 +86,10 @@ export function HistogramChart({ histogram }: { histogram: Histogram }) {
         splitLine: { lineStyle: { color: colors.line } },
       },
       series: [
-        { type: "bar", data: histogram.bars.map((b) => b.count), itemStyle: { color: "#0ea5e9" } },
+        { type: "bar", data: histogram.bars.map((b) => b.count), itemStyle: { color: colors.bar } },
       ],
     };
-  }, [histogram, dark]);
+  }, [histogram, theme]);
   return <Chart option={option} className="h-44 w-full" />;
 }
 
@@ -121,7 +118,7 @@ export function NumericTable({ stats }: { stats: Record<string, NumericStats> })
             <tr
               key={name}
               onClick={() => setOpen(open === name ? null : name)}
-              className={`cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900 ${open === name ? "bg-sky-500/10" : ""}`}
+              className={`cursor-pointer hover:bg-hover ${open === name ? "bg-accent/10" : ""}`}
             >
               <td className={td}>{name}</td>
               <td className={td}>{modeText(s)}</td>
@@ -138,7 +135,7 @@ export function NumericTable({ stats }: { stats: Record<string, NumericStats> })
       </table>
       {open && chosen?.histogram && (
         <div className="mt-2">
-          <div className="text-xs text-zinc-500">{open}</div>
+          <div className="text-xs text-muted">{open}</div>
           <HistogramChart histogram={chosen.histogram} />
         </div>
       )}

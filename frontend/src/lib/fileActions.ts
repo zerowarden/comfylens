@@ -72,6 +72,29 @@ export async function renameImage(
   }
 }
 
+/**
+ * Save a copy of an image without its metadata, through the browser's downloads. The server reads
+ * the original and never changes it.
+ */
+export async function exportStripped(client: QueryClient, id: number): Promise<void> {
+  const { notify } = useFileActions.getState();
+  const relPath = cachedRelPath(client, id);
+  const label = relPath ? baseName(relPath) : "the image";
+  try {
+    const { blob, name } = await api.stripped(id);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name ?? (relPath ? baseName(relPath) : `image-${id}`);
+    link.click();
+    // Revoked later: some browsers read the URL after click() returns.
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    notify({ text: `Exported ${link.download} without metadata`, tone: "info" });
+  } catch (e) {
+    notify({ text: `Could not export ${label}: ${errorText(e)}`, tone: "error" });
+  }
+}
+
 /** Take `gone` out of every cached id list and its pages, the selection and the open views. */
 function hide(client: QueryClient, gone: ReadonlySet<number>): void {
   const { filters, sort } = useFilters.getState();

@@ -2,11 +2,11 @@ import { useState, type ReactNode } from "react";
 
 import type { PromptGroup, PromptSide, TermRow } from "../../api/types";
 import { saveTextToCollection } from "../../lib/collection";
-import { fmtDateTime, fmtInt, fmtPct } from "../../lib/format";
+import { fmtDateTime, fmtInt, fmtPct, loadingText } from "../../lib/format";
 import { useFilters } from "../../state/filters";
 import { Glyph } from "../icons";
-import { Button, FilterLink, Message, Segmented, ShareBar, td } from "../ui";
-import { isWarming, useDistinctive, usePrompts } from "./data";
+import { Button, FilterLink, Heading, Message, Segmented, ShareBar, td } from "../ui";
+import { isWarming, promptStatus, useDistinctive, usePrompts, WARMING_TEXT } from "./data";
 import Distinctive from "./Distinctive";
 import FamilySections from "./FamilySections";
 import Thumbs from "./Thumbs";
@@ -18,7 +18,7 @@ function Terms({ title, rows }: { title: string; rows: TermRow[] }) {
   const shown = all ? rows : rows.slice(0, 15);
   return (
     <div className="mb-3">
-      <div className="mb-0.5 text-xs font-semibold text-zinc-500">{title}</div>
+      <Heading>{title}</Heading>
       <table className="w-full text-xs">
         <tbody>
           {shown.map((r) => (
@@ -35,7 +35,7 @@ function Terms({ title, rows }: { title: string; rows: TermRow[] }) {
                 <ShareBar share={r.share} />
               </td>
               <td className={`${td} text-right whitespace-nowrap tabular-nums`}>
-                {fmtInt(r.df)} <span className="text-zinc-500">{fmtPct(r.share)}</span>
+                {fmtInt(r.df)} <span className="text-muted">{fmtPct(r.share)}</span>
               </td>
             </tr>
           ))}
@@ -45,7 +45,7 @@ function Terms({ title, rows }: { title: string; rows: TermRow[] }) {
         <button
           type="button"
           onClick={() => setAll(!all)}
-          className="text-xs text-sky-600 hover:underline dark:text-sky-400"
+          className="text-xs text-link hover:underline"
         >
           {all ? "Show fewer" : `Show all ${rows.length}`}
         </button>
@@ -68,19 +68,19 @@ function Group({
       {distinctive}
       {group.templates.length > 0 && (
         <div className="mb-3">
-          <div className="mb-0.5 text-xs font-semibold text-zinc-500">Template sentences</div>
+          <Heading>Template sentences</Heading>
           <ul className="space-y-1 text-xs">
             {group.templates.map((t) => (
               <li key={t.text} className="flex gap-2">
-                <span className="flex-1 text-zinc-600 italic dark:text-zinc-400">{t.text}</span>
-                <span className="text-zinc-500 tabular-nums">{fmtPct(t.share)}</span>
+                <span className="flex-1 text-soft italic">{t.text}</span>
+                <span className="text-muted tabular-nums">{fmtPct(t.share)}</span>
               </li>
             ))}
           </ul>
         </div>
       )}
       {group.all_template ? (
-        <div className="mb-3 text-xs text-zinc-500">
+        <div className="mb-3 text-xs text-muted">
           Every sentence in scope is template text: there is nothing that differs between these
           prompts. Turn on “include template” to count it anyway.
         </div>
@@ -92,9 +92,7 @@ function Group({
           <Terms title="Trigrams" rows={group.trigrams} />
         </>
       )}
-      <div className="mb-0.5 text-xs font-semibold text-zinc-500">
-        Distinct prompts ({fmtInt(group.distinct_total)})
-      </div>
+      <Heading>Distinct prompts ({fmtInt(group.distinct_total)})</Heading>
       <ul className="space-y-1.5 text-xs">
         {group.distinct.map((p) => (
           <li key={p.key} className="flex items-start gap-1">
@@ -102,12 +100,12 @@ function Group({
               <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <Glyph
                   name="chevronRight"
-                  className="mr-0.5 size-3 align-[-0.125em] text-zinc-500 transition-transform duration-150 group-open:rotate-90"
+                  className="mr-0.5 size-3 align-[-0.125em] text-muted transition-transform duration-150 group-open:rotate-90"
                 />
                 <span className="tabular-nums">
                   {fmtInt(p.count)} ({fmtPct(p.share)})
                 </span>{" "}
-                <span className="text-zinc-500">
+                <span className="text-muted">
                   {fmtDateTime(p.first)} – {fmtDateTime(p.last)}
                 </span>
                 {/* Two lines while closed, the whole prompt once open. */}
@@ -144,13 +142,7 @@ export default function Prompts() {
 
   const distinctive = useDistinctive(side, by);
   const selecting = distinctive.isEnabled;
-  const distinctiveStatus = isWarming(distinctive.failureReason)
-    ? "Prompt analysis is warming up…"
-    : distinctive.isError
-      ? distinctive.error.message
-      : distinctive.data
-        ? "No distinctive terms for this family."
-        : "Loading…";
+  const distinctiveStatus = promptStatus(distinctive, "No distinctive terms for this family.");
   const distinctiveFor = (family: string): ReactNode =>
     selecting ? (
       <Distinctive
@@ -183,14 +175,14 @@ export default function Prompts() {
         </Button>
       </div>
       {!selecting && (
-        <div className="px-3 pb-1 text-xs text-zinc-500">
+        <div className="px-3 pb-1 text-xs text-muted">
           Select images to see the prompt terms that set them apart from the rest.
         </div>
       )}
       {warming && !query.data ? (
-        <Message>Prompt analysis is warming up…</Message>
+        <Message>{WARMING_TEXT}</Message>
       ) : !query.data ? (
-        <Message>{query.isError ? query.error.message : "Loading…"}</Message>
+        <Message>{loadingText(query.error)}</Message>
       ) : (
         <FamilySections groups={query.data.groups} count={(g) => g.images}>
           {(group) => (

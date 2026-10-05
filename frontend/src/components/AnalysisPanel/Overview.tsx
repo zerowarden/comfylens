@@ -1,7 +1,7 @@
 import type { StatsResponse } from "../../api/types";
 import { useFilters } from "../../state/filters";
 import CategoricalTable from "./Categorical";
-import { isWarming, usePrompts } from "./data";
+import { promptStatus, usePrompts } from "./data";
 import FamilySections from "./FamilySections";
 import { FILTERABLE } from "./format";
 import { NumericTable } from "./Numeric";
@@ -15,30 +15,13 @@ const CATEGORIES: [string, string][] = [
   ["sampler_name", "Sampler"],
   ["scheduler", "Scheduler"],
 ];
-const NUMERIC = [
-  "steps",
-  "cfg",
-  "denoise",
-  "guidance",
-  "shift",
-  "stage_count",
-  "megapixels",
-  "width",
-  "height",
-  "aspect",
-];
+const NUMERIC = ["steps", "cfg", "denoise", "guidance", "shift", "stage_count", "megapixels"];
 
 export default function Overview({ data }: { data: StatsResponse }) {
   const include = useFilters((s) => s.include);
   const positive = usePrompts("positive");
   const negative = usePrompts("negative");
-  const status = isWarming(positive.failureReason)
-    ? "Prompt analysis is warming up…"
-    : positive.isError
-      ? positive.error.message
-      : positive.data
-        ? null
-        : "Loading…";
+  const status = promptStatus(positive, null);
   return (
     <FamilySections groups={data.groups} count={(g) => g.images}>
       {(group) => (

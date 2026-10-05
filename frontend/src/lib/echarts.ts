@@ -8,9 +8,9 @@ echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
 export { echarts };
 export type EChartsOption = echarts.EChartsCoreOption;
 
-export function axisColors(dark: boolean) {
-  return {
-    text: dark ? "#a1a1aa" : "#52525b",
-    line: dark ? "#3f3f46" : "#d4d4d8",
-  };
+/** The chart colours of the active theme, from theme.css (a canvas cannot read CSS variables). */
+export function chartColors() {
+  const style = getComputedStyle(document.documentElement);
+  const read = (name: string) => style.getPropertyValue(name).trim();
+  return { text: read("--chart-text"), line: read("--chart-line"), bar: read("--chart-bar") };
 }
