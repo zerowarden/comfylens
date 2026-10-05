@@ -3,11 +3,18 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { api } from "../api/client";
 import type { FacetValue, NumericFilterField, Range } from "../api/types";
+import { useSavedPrompt } from "../lib/collection";
 import { fmtInt, fmtNum } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
-import { hasActiveFilters, useFilters, type ListField } from "../state/filters";
+import {
+  NUMERIC_STEPS,
+  RANGE_SLIDER_FIELDS,
+  hasActiveFilters,
+  useFilters,
+  type ListField,
+} from "../state/filters";
 import { ChainText, Glyph } from "./icons";
-import { Button, FIELD, FamilyDot, Segmented } from "./ui";
+import { Button, ErrorState, FIELD, FamilyDot, Segmented, ShowAllToggle } from "./ui";
 
 const SHOWN = 8;
 
@@ -66,25 +73,11 @@ function FacetList({
         ))}
       </ul>
       {!search && matching.length > SHOWN && (
-        <button
-          type="button"
-          onClick={() => setAll(!all)}
-          className="mt-0.5 text-xs text-link hover:underline"
-        >
-          {all ? "Show fewer" : `Show all ${matching.length}`}
-        </button>
+        <ShowAllToggle count={matching.length} all={all} onToggle={() => setAll(!all)} />
       )}
     </div>
   );
 }
-
-const STEPS: Record<string, number> = {
-  steps: 1,
-  cfg: 0.1,
-  denoise: 0.01,
-  guidance: 0.1,
-  shift: 0.05,
-};
 
 /** Two overlaid range inputs; the filter is dropped when the range covers everything. */
 function RangeFilter({ field, range }: { field: NumericFilterField; range: Range }) {
@@ -117,7 +110,7 @@ function RangeFilter({ field, range }: { field: NumericFilterField; range: Range
   }, [committed]);
 
   if (range.min === null || range.max === null || range.min === range.max) return null;
-  const step = STEPS[field] ?? 0.01;
+  const step = NUMERIC_STEPS[field];
   const input =
     "pointer-events-none absolute inset-0 w-full appearance-none bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto";
   return (
@@ -193,17 +186,32 @@ function TextSearch() {
   );
 }
 
+/** The similar-sentence cluster filter, set in the Prompts tab and cleared here. */
+function SentenceFilter() {
+  const sentences = useFilters((s) => s.filters.sentences);
+  const update = useFilters((s) => s.update);
+  if (sentences.length === 0) return null;
+  return (
+    <div className="border-b border-line px-3 py-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-xs font-semibold tracking-wide text-muted uppercase">
+          Similar sentences
+        </span>
+        <Button onClick={() => update((f) => ({ ...f, sentences: [] }))}>Clear</Button>
+      </div>
+      <div className="text-xs text-muted">
+        {fmtInt(sentences.length)} similar {sentences.length === 1 ? "sentence" : "sentences"}
+      </div>
+    </div>
+  );
+}
+
 /** Saved or not, and the one saved prompt "Show in library" filters to. */
 function CollectionFilter() {
   const saved = useFilters((s) => s.filters.saved);
   const promptId = useFilters((s) => s.filters.saved_prompt);
   const update = useFilters((s) => s.update);
-  const prompt = useQuery({
-    queryKey: ["collection", "prompt", promptId],
-    queryFn: () => api.savedPrompt(promptId!),
-    enabled: promptId !== null,
-    retry: false,
-  });
+  const prompt = useSavedPrompt(promptId);
   return (
     <div className="border-b border-line px-3 py-2">
       <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
@@ -270,7 +278,7 @@ export default function FilterSidebar() {
         </Button>
       </div>
       <TextSearch />
-      {facets.isError && <div className="px-3 py-2 text-danger">{facets.error.message}</div>}
+      {facets.isError && <ErrorState error={facets.error} className="px-3 py-2" />}
       {lists.slice(0, 2).map(([title, field, values]) => (
         <FacetList
           key={field}
@@ -337,13 +345,14 @@ export default function FilterSidebar() {
           <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
             Settings
           </div>
-          {(["cfg", "steps", "denoise"] as const).map((field) => {
+          {RANGE_SLIDER_FIELDS.map((field) => {
             const range = f.numeric_ranges[field];
             return range ? <RangeFilter key={field} field={field} range={range} /> : null;
           })}
         </div>
       )}
       <CollectionFilter />
+      <SentenceFilter />
       <div className="px-3 py-2">
         <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
           Warnings

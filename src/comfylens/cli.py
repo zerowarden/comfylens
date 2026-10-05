@@ -2,10 +2,8 @@ import contextlib
 import errno
 import ipaddress
 import json
-import os
 import socket
 import sys
-import tempfile
 import threading
 import time
 import webbrowser
@@ -29,10 +27,12 @@ from comfylens.extract.normalize import size_facts
 from comfylens.extract.pipeline import Analysis, analyze
 from comfylens.extract.registry import unregistered
 from comfylens.extract.types import Extraction
+from comfylens.fileio import write_atomic
 from comfylens.index.indexer import Indexer, IndexStatus, UnsafeLocation
 from comfylens.index.lock import IndexLocked
 from comfylens.paths import catalog_path, collection_dir
-from comfylens.report import build_report, render_report
+from comfylens.report_data import build_report
+from comfylens.report_render import render_report
 from comfylens.version import EXTRACTOR_VERSION, SCHEMA_VERSION
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -544,14 +544,9 @@ def export_collection(
         raise typer.Exit(1)
     store = _collection()
     # Written beside the target and renamed into place: a backup is never left half-written.
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".comfylens-export-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as out:
-            prompts, images = export_zip(store, out)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    prompts, images = write_atomic(
+        path, lambda out: export_zip(store, out), prefix=".comfylens-export-"
+    )
     typer.echo(f"Exported {_count(prompts, 'prompt')} and {_count(images, 'image')} to {path}")
 
 

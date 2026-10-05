@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from conftest import png_with_text, wait_for, write_file
+from conftest import catalog_rows, png_with_text, wait_for, write_file
 from fastapi.testclient import TestClient
 from graph_builder import REALISM_PROMPT, basic_txt2img, krea2_api, krea2_qwen_realism
 
@@ -155,16 +155,8 @@ def library(tmp_path: Path, config: Config) -> Path:
     return root
 
 
-def query(root: Path, sql: str) -> list[tuple]:
-    conn = connect_readonly(catalog_path(root))
-    try:
-        return conn.execute(sql).fetchall()
-    finally:
-        conn.close()
-
-
 def test_stages_and_their_loras_are_stored(library: Path):
-    assert query(
+    assert catalog_rows(
         library,
         "SELECT f.rel_path, s.stage_index, s.model_family, s.base_model, s.lora_stack_key,"
         " s.positive_prompt FROM sampler_stages s JOIN files f ON f.id = s.file_id"
@@ -177,7 +169,7 @@ def test_stages_and_their_loras_are_stored(library: Path):
         ("realism.png", 1, "qwen-image-2.1", "qwen_image_2.1_int8_convrot",
          "qwen2.1-lenovo-ultrareal@1.06", REALISM_PROMPT),
     ]  # fmt: skip
-    assert query(
+    assert catalog_rows(
         library,
         "SELECT f.rel_path, g.model_family FROM generations g JOIN files f ON f.id = g.file_id"
         " ORDER BY f.rel_path",
@@ -185,13 +177,30 @@ def test_stages_and_their_loras_are_stored(library: Path):
 
 
 def test_a_lora_shared_by_stages_counts_once_in_statistics(library: Path):
-    assert query(library, "SELECT COUNT(*) FROM loras WHERE name = 'fox'") == [(2,)]
+    assert catalog_rows(library, "SELECT COUNT(*) FROM loras WHERE name = 'fox'") == [(2,)]
     conn = connect_readonly(catalog_path(library))
     try:
         frame = loras_frame(conn)
     finally:
         conn.close()
     assert sorted(frame["name"].to_list()) == ["fox", "krea2_darkbrush", "qwen2.1-lenovo-ultrareal"]
+
+
+def test_lora_graph_links_loras_used_in_one_image(client: TestClient):
+    stats = client.post("/api/stats", json={"sections": ["graph"]}).json()
+    realism = next(g for g in stats["groups"] if g["family"] == "krea-2 + qwen-image-2.1")
+    assert [n["name"] for n in realism["graph"]["nodes"]] == [
+        "krea2_darkbrush",
+        "qwen2.1-lenovo-ultrareal",
+    ]
+    # The two passes use different LoRAs, but the one image uses both: one link.
+    assert realism["graph"]["links"] == [
+        {
+            "source": "krea2_darkbrush",
+            "target": "qwen2.1-lenovo-ultrareal",
+            "images": 1,
+        }
+    ]
 
 
 @pytest.fixture
@@ -219,7 +228,7 @@ def test_detail_serves_each_stage(client: TestClient):
 
 
 def test_prompt_search_covers_later_stages(library: Path, client: TestClient):
-    found = query(
+    found = catalog_rows(
         library,
         "SELECT f.rel_path FROM prompts_fts JOIN files f ON f.id = prompts_fts.rowid"
         " WHERE prompts_fts MATCH '\"realistic photograph\"'",

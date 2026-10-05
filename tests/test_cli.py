@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-from conftest import load_golden, png_with_text
+from conftest import library_snapshot, load_golden, png_with_text
 from typer.testing import CliRunner
 
 from comfylens.cli import app
@@ -17,10 +17,6 @@ def golden_file(tmp_path: Path) -> Path:
     workflow = load_golden("sample_qwen21.workflow.json")
     path.write_bytes(png_with_text({"prompt": prompt, "workflow": workflow}))
     return path
-
-
-def snapshot(root: Path) -> dict[str, int]:
-    return {str(p): p.stat().st_mtime_ns for p in sorted(root.rglob("*"))}
 
 
 def test_inspect_prints_chain_and_unused_lora(tmp_path: Path):
@@ -71,10 +67,10 @@ def test_inspect_rejects_invalid_config(tmp_path: Path):
 def test_inspect_never_writes_to_the_library(tmp_path: Path):
     path = golden_file(tmp_path)
     os.utime(path, ns=(1_000_000_000, 1_790_649_651_329_171_267))
-    before = snapshot(path.parent)
+    before = library_snapshot(path.parent)
     for args in (["inspect", str(path)], ["inspect", "--json", str(path)]):
         assert runner.invoke(app, args).exit_code == 0
-    assert snapshot(path.parent) == before
+    assert library_snapshot(path.parent) == before
 
 
 def test_index_reports_a_rate_after_a_reextract_only_run(tmp_path: Path, monkeypatch):

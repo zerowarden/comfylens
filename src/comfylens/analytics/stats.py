@@ -6,12 +6,12 @@ from typing import Any
 import polars as pl
 
 from comfylens.analytics.categorical import seed_stats, value_counts
-from comfylens.analytics.configs import top_configs
-from comfylens.analytics.loras import LoraKey, lora_table, stacks
+from comfylens.analytics.loras import LoraKey, lora_graph, lora_table, top_values
 from comfylens.analytics.numeric import HistogramSpec, numeric_stats
 from comfylens.analytics.scope import Resolved
 from comfylens.analytics.snapshot import Snapshot
 from comfylens.config import AnalysisConfig
+from comfylens.extract.keys import decode_config_key
 
 NUMERIC_FIELDS = (
     "steps",
@@ -43,6 +43,22 @@ def histogram_spec(analysis: AnalysisConfig) -> HistogramSpec:
     return HistogramSpec(analysis.discrete_max_distinct, analysis.histogram_bins)
 
 
+def top_configs(rows: pl.DataFrame, top_n: int) -> list[dict[str, Any]]:
+    """Top configurations as whole combinations: per-field modes need not co-occur in any image."""
+    size = rows.height
+    return [
+        {
+            "key": key,
+            "count": count,
+            "share": count / size,
+            "fields": decode_config_key(key),
+            "examples": ids,
+            "example_hashes": hashes,
+        }
+        for key, count, ids, hashes in top_values(rows, "config_key", top_n).iter_rows()
+    ]
+
+
 def compute_stats(
     snap: Snapshot,
     resolved: Resolved,
@@ -66,11 +82,12 @@ def compute_stats(
             }
         if "seeds" in sections:
             block["seeds"] = seed_stats(rows["seed"])
-        if "loras" in sections:
+        if "loras" in sections or "graph" in sections:
             uses = snap.loras.filter(pl.col("file_id").is_in(rows["id"].implode()))
+        if "loras" in sections:
             block["loras"] = lora_table(uses, size, lora_key, analysis.round_decimals, spec)
-        if "stacks" in sections:
-            block["stacks"] = stacks(rows, analysis.top_n)
+        if "graph" in sections:
+            block["graph"] = lora_graph(uses, lora_key, analysis.top_n)
         if "configs" in sections:
             block["configs"] = top_configs(rows, analysis.top_n)
         out.append(block)

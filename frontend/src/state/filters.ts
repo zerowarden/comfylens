@@ -11,6 +11,18 @@ export const NUMERIC_FIELDS: NumericFilterField[] = [
   "guidance",
   "shift",
 ];
+
+/** One range step per numeric field. */
+export const NUMERIC_STEPS: Record<NumericFilterField, number> = {
+  steps: 1,
+  cfg: 0.1,
+  denoise: 0.01,
+  guidance: 0.1,
+  shift: 0.05,
+};
+
+/** The numeric fields that get range sliders; the others only appear in the query string. */
+export const RANGE_SLIDER_FIELDS: NumericFilterField[] = ["cfg", "steps", "denoise"];
 export const SORT_KEYS: SortKey[] = ["generated_at", "rel_path", "family", "steps", "cfg"];
 const STATUSES: Status[] = ["ok", "partial", "no_metadata", "error"];
 
@@ -28,6 +40,7 @@ export const emptyFilters = (): Filters => ({
   has_warnings: null,
   saved: null,
   saved_prompt: null,
+  sentences: [],
 });
 
 export const defaultSort = (): Sort => ({ key: "generated_at", descending: true });
@@ -46,7 +59,8 @@ export function hasActiveFilters(f: Filters): boolean {
     Object.keys(f.numeric).length > 0 ||
     f.has_warnings !== null ||
     f.saved !== null ||
-    f.saved_prompt !== null
+    f.saved_prompt !== null ||
+    f.sentences.length > 0
   );
 }
 
@@ -76,6 +90,7 @@ export function toSearch(filters: Filters, sort: Sort): string {
   if (filters.has_warnings !== null) p.set("warnings", filters.has_warnings ? "yes" : "no");
   if (filters.saved !== null) p.set("saved", filters.saved ? "yes" : "no");
   if (filters.saved_prompt !== null) p.set("prompt", String(filters.saved_prompt));
+  for (const sentence of filters.sentences) p.append("sentence", sentence);
   const d = defaultSort();
   if (sort.key !== d.key) p.set("sort", sort.key);
   if (sort.descending !== d.descending) p.set("order", sort.descending ? "desc" : "asc");
@@ -119,6 +134,7 @@ export function fromSearch(search: string): { filters: Filters; sort: Sort } {
   filters.saved = saved === "yes" ? true : saved === "no" ? false : null;
   const prompt = p.get("prompt");
   filters.saved_prompt = prompt && /^[1-9]\d{0,15}$/.test(prompt) ? Number(prompt) : null;
+  filters.sentences = p.getAll("sentence").filter((s) => /^[0-9a-f]{16}$/.test(s));
 
   const sort = defaultSort();
   const key = p.get("sort");
@@ -144,6 +160,10 @@ interface FilterStore {
 const toggled = (values: string[], value: string) =>
   values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
 
+/** `values` with `value` added once; the same array when it is already there. */
+const included = (values: string[], value: string) =>
+  values.includes(value) ? values : [...values, value];
+
 const initial = typeof window === "undefined" ? null : fromSearch(window.location.search);
 
 export const useFilters = create<FilterStore>((set) => ({
@@ -158,9 +178,8 @@ export const useFilters = create<FilterStore>((set) => ({
   include: (field, value) =>
     set((s) => {
       const values = s.filters[field] as string[];
-      return values.includes(value)
-        ? s
-        : { filters: { ...s.filters, [field]: [...values, value] } };
+      const next = included(values, value);
+      return next === values ? s : { filters: { ...s.filters, [field]: next } };
     }),
   toggleLora: (name) =>
     set((s) => ({
@@ -170,25 +189,13 @@ export const useFilters = create<FilterStore>((set) => ({
       },
     })),
   includeLora: (name) =>
-    set((s) =>
-      s.filters.loras.names.includes(name)
+    set((s) => {
+      const names = s.filters.loras.names;
+      const next = included(names, name);
+      return next === names
         ? s
-        : {
-            filters: {
-              ...s.filters,
-              loras: { ...s.filters.loras, names: [...s.filters.loras.names, name] },
-            },
-          },
-    ),
+        : { filters: { ...s.filters, loras: { ...s.filters.loras, names: next } } };
+    }),
   setSort: (sort) => set({ sort }),
   clear: () => set({ filters: emptyFilters() }),
 }));
-
-/** Keep filters and sort in the address bar, so a view survives a reload. */
-export function syncFiltersToUrl(): () => void {
-  return useFilters.subscribe((s) => {
-    const search = toSearch(s.filters, s.sort);
-    const url = `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`;
-    window.history.replaceState(null, "", url);
-  });
-}

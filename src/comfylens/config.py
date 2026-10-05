@@ -51,7 +51,6 @@ class ThumbsConfig:
 
 @dataclass(frozen=True)
 class AnalysisConfig:
-    group_by_family: bool
     dedupe_identical_files: bool
     round_decimals: int
     config_round_decimals: int
@@ -69,6 +68,7 @@ class PromptsConfig:
     template_min_scope: int
     stopwords_file: str
     distinctive_alpha0: float
+    cluster_similarity: float
 
 
 @dataclass(frozen=True)
@@ -224,6 +224,10 @@ def _build(m: dict[str, Any]) -> Config:
     prompts = PromptsConfig(**m["prompts"])
     _require(0 < prompts.template_threshold <= 1, "prompts.template_threshold must be in (0, 1]")
     _require(prompts.distinctive_alpha0 > 0, "prompts.distinctive_alpha0 must be > 0")
+    _require(
+        0 < prompts.cluster_similarity <= 1,
+        "prompts.cluster_similarity must be in (0, 1]",
+    )
 
     t = m["timestamps"]
     _require(

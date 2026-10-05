@@ -161,10 +161,13 @@ describe.skipIf(!base)("live API contract", () => {
       "status",
       "error",
     ]);
-    if (detail.nodes[0])
+    if (detail.generation) {
+      // An image with generation metadata was built from a graph, so it has nodes.
+      expect(detail.nodes.length).toBeGreaterThan(0);
       expectKeys(detail.nodes[0], ["id", "class_type", "title", "reachable", "inputs"]);
-    if (detail.loras[0]) {
-      expectKeys(detail.loras[0], [
+    }
+    for (const lora of detail.loras) {
+      expectKeys(lora, [
         "position",
         "stage_index",
         "node_id",
@@ -198,7 +201,7 @@ describe.skipIf(!base)("live API contract", () => {
     for (const scope of scopes) {
       const stats = await api.stats({
         ...scope,
-        sections: ["numeric", "categorical", "seeds", "loras", "stacks", "configs"],
+        sections: ["numeric", "categorical", "seeds", "loras", "graph", "configs"],
         lora_key: "name",
       });
       expectKeys(stats, ["scope", "groups"]);
@@ -211,14 +214,14 @@ describe.skipIf(!base)("live API contract", () => {
         "categorical",
         "seeds",
         "loras",
-        "stacks",
+        "graph",
         "configs",
       ]);
       expectKeys(g.numeric!.steps, NUMERIC);
       expectKeys(g.categorical!.sampler_name, ["n", "values", "other", "missing"]);
       expectKeys(g.seeds, ["n", "n_unique", "repeated"]);
-      if (g.loras![0]) {
-        expectKeys(g.loras![0], [
+      for (const lora of g.loras!) {
+        expectKeys(lora, [
           "name",
           "images",
           "share",
@@ -228,8 +231,9 @@ describe.skipIf(!base)("live API contract", () => {
           "steps",
         ]);
       }
-      if (g.stacks![0])
-        expectKeys(g.stacks![0], ["key", "count", "share", "examples", "example_hashes"]);
+      expectKeys(g.graph, ["nodes", "links"]);
+      for (const node of g.graph!.nodes) expectKeys(node, ["name", "images", "median"]);
+      for (const link of g.graph!.links) expectKeys(link, ["source", "target", "images"]);
       expectKeys(g.configs![0], ["key", "count", "share", "fields", "examples", "example_hashes"]);
     }
     expect(
@@ -238,7 +242,7 @@ describe.skipIf(!base)("live API contract", () => {
     ).toBe("selection");
     const byBase = await api.stats({
       ...all,
-      sections: ["loras", "stacks"],
+      sections: ["loras", "graph"],
       lora_key: "base_name",
     });
     expect(byBase.groups[0]!.numeric).toBeNull();

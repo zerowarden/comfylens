@@ -27,7 +27,7 @@ from comfylens.db.read import (
     generations_frame,
     loras_frame,
 )
-from comfylens.extract.normalize import aspect
+from comfylens.extract.normalize import aspect, megapixels
 from comfylens.warn import INFORMATIONAL_CODES
 
 NO_METADATA = "(no metadata)"  # the family of files without a generations row
@@ -118,12 +118,13 @@ def snapshot_from_conn(conn: sqlite3.Connection, *, with_node_inputs: bool = Tru
 def _derive(joined: pl.DataFrame, warned: set[int]) -> pl.DataFrame:
     sizes = joined.select("width", "height").unique().drop_nulls()
     labels = pl.DataFrame(
-        [(w, h, *aspect(w, h)) for w, h in sizes.iter_rows() if h],
+        [(w, h, *aspect(w, h), megapixels(w, h)) for w, h in sizes.iter_rows() if h],
         schema={
             "width": pl.Int64,
             "height": pl.Int64,
             "aspect": pl.Float64,
             "aspect_label": pl.String,
+            "megapixels": pl.Float64,
         },
         orient="row",
     )
@@ -140,7 +141,6 @@ def _derive(joined: pl.DataFrame, warned: set[int]) -> pl.DataFrame:
         joined.with_columns(
             pl.col("model_family").is_not_null().alias("has_generation"),
             pl.col("seed").cast(pl.UInt64, strict=False),
-            (pl.col("width") * pl.col("height") / 1_000_000).round(3).alias("megapixels"),
             pl.format("{}x{}", "width", "height").alias("resolution"),
             pl.col("id").is_in(list(warned)).alias("has_warnings"),
         )
@@ -238,7 +238,10 @@ class SnapshotStore:
         frames = build_prompt_frames(
             rows, self.config.prompts, resolve_workers(self.config.index.workers)
         )
-        snap.prompts = frames  # a reference assignment; readers see None or complete frames
+        # A reference assignment; readers see None or complete frames. The new built_at tells the
+        # UI that prompt-frame-dependent answers (e.g. a similar-sentence filter) are now valid.
+        snap.prompts = frames
+        snap.built_at = time.time()
 
 
 def apply_rename(snap: Snapshot, file_id: int, rel_path: str, generated_at: int) -> None:

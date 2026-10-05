@@ -54,6 +54,9 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --animate-panel-in: panel-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --animate-expand: expand 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-in: fade-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* `forwards` holds the last frame until the view unmounts a frame or two later. */
+  --animate-fade-out: fade-out 150ms ease-in forwards;
 
   @keyframes panel-in {
     from {
@@ -65,6 +68,16 @@
     from {
       opacity: 0;
       transform: translateY(-4px);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes fade-out {
+    to {
+      opacity: 0;
     }
   }
 }

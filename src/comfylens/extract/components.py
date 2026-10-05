@@ -9,7 +9,7 @@ from comfylens.extract.samplers import StageTrace
 from comfylens.extract.switches import follow, through_switches
 from comfylens.extract.types import InputImage
 from comfylens.extract.values import as_int, as_str, read_str
-from comfylens.graph.model import Graph, Link, Node
+from comfylens.graph.model import Graph, Node
 from comfylens.graph.reachability import Reachability, upstream
 
 _SHA256 = re.compile(r"[0-9a-fA-F]{64}")
@@ -63,7 +63,8 @@ def vae(graph: Graph, reach: Reachability) -> str | None:
 
 def latent(graph: Graph, primary: StageTrace | None) -> tuple[str | None, int | None]:
     """The class feeding the primary stage's latent input, and its batch size if any."""
-    source = _source(graph, through_switches(graph, primary.first("latent"))) if primary else None
+    link = through_switches(graph, primary.first("latent")) if primary else None
+    source = graph.nodes.get(link.src) if link else None
     if source is None:
         return None, None
     return source.class_type, as_int(source.literal("batch_size"))
@@ -82,10 +83,6 @@ def input_images(graph: Graph, reach: Reachability) -> list[InputImage]:
         filename = read_str(node, REGISTRY[node.class_type], "filename")
         images.append(InputImage(node_id, filename, sha256))
     return images
-
-
-def _source(graph: Graph, link: Link | None) -> Node | None:
-    return graph.nodes.get(link.src) if link else None
 
 
 def _nearest(graph: Graph, start: str, role: Role) -> Node | None:

@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
 import polars as pl
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from comfylens.analytics.collection import has_hash
 from comfylens.analytics.snapshot import NO_METADATA, Snapshot
@@ -28,6 +28,10 @@ class Lookup(Protocol):
         """Ids of files linked to the saved prompt or sharing its positive prompt."""
         ...
 
+    def sentence_ids(self, hashes: set[int]) -> set[int]:
+        """Ids of files whose positive or negative prompt holds one of these sentences."""
+        ...
+
 
 class _NoLookup:
     def search(self, text: str) -> set[int]:
@@ -39,10 +43,15 @@ class _NoLookup:
     def saved_prompt_ids(self, prompt_id: int) -> set[int]:
         return set()
 
+    def sentence_ids(self, hashes: set[int]) -> set[int]:
+        return set()
+
 
 NO_LOOKUP: Lookup = _NoLookup()  # matches nothing: for callers without a server
 
 NumericFilterField = Literal["steps", "cfg", "denoise", "guidance", "shift"]
+# A segmented sentence's xxh3_64 hash as 16 lowercase hex digits.
+SentenceKey = Annotated[str, Field(pattern=r"^[0-9a-f]{16}$")]
 
 
 class LoraFilter(BaseModel):
@@ -64,6 +73,7 @@ class Filters(BaseModel):
     has_warnings: bool | None = None
     saved: bool | None = None  # content hash linked to any saved prompt (or to none)
     saved_prompt: int | None = None  # one saved prompt's files: linked, or the same prompt
+    sentences: list[SentenceKey] = []  # similar-sentence cluster: the member sentence hashes
 
 
 class Scope(BaseModel):
@@ -104,6 +114,7 @@ def is_filtered(f: Filters) -> bool:
         or f.has_warnings is not None
         or f.saved is not None
         or f.saved_prompt is not None
+        or f.sentences
     )
 
 
@@ -140,6 +151,10 @@ def filter_files(
         conditions.append(saved if f.saved else ~saved)
     if f.saved_prompt is not None:
         ids = pl.Series(sorted(lookup.saved_prompt_ids(f.saved_prompt)), dtype=pl.Int64)
+        conditions.append(pl.col("id").is_in(ids.implode()))
+    if f.sentences:
+        found = lookup.sentence_ids({int(s, 16) for s in f.sentences})
+        ids = pl.Series(sorted(found), dtype=pl.Int64)
         conditions.append(pl.col("id").is_in(ids.implode()))
     return snap.images.filter(*conditions) if conditions else snap.images
 

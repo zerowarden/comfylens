@@ -19,8 +19,8 @@ import { useImageDetail } from "../lib/images";
 import { useCollection } from "../state/collection";
 import { useFileActions, type ContextMenu } from "../state/fileActions";
 import { Glyph } from "./icons";
-import { Modal } from "./Modals";
-import { Button, DESTRUCTIVE, FOCUS_FIELD, PRIMARY } from "./ui";
+import { Modal } from "./Modal";
+import { Button, DESTRUCTIVE, DialogActions, FOCUS_FIELD, PRIMARY } from "./ui";
 
 const TRASH_LISTED = 5; // file names the trash dialog lists before "and N more"
 
@@ -258,12 +258,12 @@ function RenameForm({
         />
       </label>
       {problem && <p className="text-xs text-danger">{problem}</p>}
-      <div className="flex justify-end gap-2">
+      <DialogActions>
         <Button onClick={onCancel}>Cancel</Button>
         <button type="submit" disabled={problem !== null} className={PRIMARY}>
           Rename
         </button>
-      </div>
+      </DialogActions>
     </form>
   );
 }
@@ -293,7 +293,7 @@ function TrashDialog({ ids }: { ids: number[] }) {
       <p className="mb-4 text-xs text-muted">
         The files go to the system trash, where your file manager can restore them.
       </p>
-      <div className="flex justify-end gap-2">
+      <DialogActions>
         <Button onClick={close}>Cancel</Button>
         <button
           type="button"
@@ -306,7 +306,7 @@ function TrashDialog({ ids }: { ids: number[] }) {
         >
           Move to trash
         </button>
-      </div>
+      </DialogActions>
     </Modal>
   );
 }

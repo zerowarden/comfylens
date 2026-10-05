@@ -1,12 +1,6 @@
 import type { NumericStats } from "../../api/types";
-import { fmtNum, fmtPct } from "../../lib/format";
+import { fmtNum } from "../../lib/format";
 import type { ListField } from "../../state/filters";
-
-export function modeText(s: NumericStats): string {
-  if (s.mode.length === 0) return s.mode_note ? `— (${s.mode_note})` : "—";
-  const values = s.mode.map(fmtNum).join(", ");
-  return `${values} (${fmtPct(s.mode_share)})${s.mode_tied ? " tied" : ""}`;
-}
 
 export function rangeText(s: NumericStats): string {
   return s.min === null ? "—" : `${fmtNum(s.min)}–${fmtNum(s.max)}`;

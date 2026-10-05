@@ -5,9 +5,17 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from conftest import golden_png, ids_by_path, png_with_text, server_of, wait_for, write_file
+from conftest import (
+    flux,
+    golden_png,
+    ids_by_path,
+    library_snapshot,
+    png_with_text,
+    server_of,
+    wait_for,
+    write_file,
+)
 from fastapi.testclient import TestClient
-from graph_builder import basic_txt2img
 
 from comfylens.api.app import create_app
 from comfylens.config import Config
@@ -19,20 +27,6 @@ from comfylens.version import SCHEMA_VERSION
 
 DAY = 86_400
 T0 = 1_790_000_000  # 2026-09-21
-
-
-def flux(seed: int, prompt: str, lora: float | None = None) -> bytes:
-    g = basic_txt2img()
-    g.prompt["7"]["inputs"]["seed"] = seed
-    g.prompt["4"]["inputs"]["text"] = prompt
-    if lora is not None:
-        g.node(
-            "20", "LoraLoaderModelOnly", lora_name="fox.safetensors", strength_model=lora,
-            model=("1", 0),
-        )  # fmt: skip
-        g.prompt["7"]["inputs"]["model"] = ["20", 0]
-    return png_with_text({"prompt": g.prompt}, (16, 24))
-
 
 write = write_file
 
@@ -144,7 +138,7 @@ def test_stats_sections(client: TestClient):
     steps = flux["numeric"]["steps"]
     assert (steps["n"], steps["mode"], steps["mode_share"]) == (4, [20.0], 1.0)
     assert steps["histogram"] == {"kind": "discrete", "bars": [{"x0": 20, "x1": 20, "count": 4}]}
-    assert "model_family" not in flux["categorical"]  # only when pooled
+    assert "model_family" not in flux["categorical"]  # the group key, not a categorical field
     assert flux["categorical"]["sampler_name"]["values"] == [
         {"value": "euler", "count": 4, "share": 1.0}
     ]
@@ -156,15 +150,22 @@ def test_stats_sections(client: TestClient):
     assert fox["strength_model"]["n"] == 3
     assert fox["strength_model"]["mean"] == pytest.approx(0.8666666)
     assert fox["positions"] == [{"value": 0, "count": 3}]
-    stack = flux["stacks"][0]
-    assert (stack["key"], stack["count"]) == ("fox@0.8", 2)
-    ids = ids_by_path(client)
-    assert stack["examples"] == [ids["fox2.png"], ids["fox1.png"]]  # most recent first
-    items = client.post("/api/images/query", json={}).json()["items"]
-    hashes = {i["id"]: i["content_hash"] for i in items}
-    assert stack["example_hashes"] == [hashes[i] for i in stack["examples"]]
     assert flux["configs"][0]["fields"]["lora_stack_key"] == "fox@0.8"
+    # The co-occurrence graph: fox alone has no links; the golden chain links its two LoRAs.
+    assert {"name": "fox", "images": 3, "median": 0.8} in flux["graph"]["nodes"]
+    assert flux["graph"]["links"] == []
     assert qwen["loras"][0]["name"] == "qwen2.1-anime2real-sunburst"
+    assert qwen["graph"]["nodes"] == [
+        {"name": "qwen2.1-anime2real-sunburst", "images": 1, "median": 1.13},
+        {"name": "qwen2.1-lenovo-ultrareal", "images": 1, "median": 1.06},
+    ]
+    assert qwen["graph"]["links"] == [
+        {
+            "source": "qwen2.1-anime2real-sunburst",
+            "target": "qwen2.1-lenovo-ultrareal",
+            "images": 1,
+        }
+    ]
 
 
 def test_stats_base_name(client: TestClient):
@@ -200,6 +201,49 @@ def test_prompts(client: TestClient):
     negative = client.post("/api/prompts", json={"side": "negative"}).json()
     assert negative["side"] == "negative"
     assert negative["groups"][0]["distinct"][0]["text"] == "blurry"
+
+
+def test_similar_sentence_clusters_filter_images(tmp_path: Path, config: Config):
+    root = tmp_path / "library"
+    write(root, "fox1.png", flux(1, "a red fox in the snow"), T0)
+    write(root, "fox2.png", flux(2, "a red fox in the snow at night"), T0 + 60)
+    write(root, "owl.png", flux(3, "an owl on a branch"), T0 + 120)
+    Indexer(root, config, workers=1).run()
+    with TestClient(create_app(root, config, index_on_start=False, web_dir=None)) as c:
+        wait_for(lambda: c.get("/api/library").json()["prompts_ready"])
+        body = c.post("/api/prompts", json={}).json()
+        (group,) = body["groups"]
+        (cluster,) = group["clusters"]
+        assert cluster["text"] == "a red fox in the snow"
+        assert {m["text"] for m in cluster["members"]} == {
+            "a red fox in the snow",
+            "a red fox in the snow at night",
+        }
+        assert cluster["images"] == 2
+
+        # Clicking the cluster filters the library to exactly its images.
+        filter_body = {"filters": {"sentences": [m["key"] for m in cluster["members"]]}}
+        page = c.post("/api/images/query", json=filter_body).json()
+        assert page["total"] == 2
+        assert sorted(i["rel_path"] for i in page["items"]) == ["fox1.png", "fox2.png"]
+
+        # While prompt frames are not ready the filter matches nothing, not everything.
+        snap = server_of(c).store.current
+        frames, snap.prompts = snap.prompts, None
+        try:
+            assert c.post("/api/images/query", json=filter_body).json()["total"] == 0
+        finally:
+            snap.prompts = frames
+
+
+def test_prompt_frames_arrival_bumps_the_snapshot(client: TestClient):
+    # The UI polls while prompts warm up and refetches when built_at moves, so a sentence
+    # filter applied before the frames land resolves on its own.
+    server = server_of(client)
+    before = server.store.current.built_at
+    server.store.rebuild()
+    wait_for(lambda: server.store.current.prompts is not None)
+    assert server.store.current.built_at > before
 
 
 def test_prompts_warming(client: TestClient):
@@ -476,13 +520,7 @@ def test_snapshot_rebuild_failure_is_reported(client: TestClient, monkeypatch: p
 
 
 def test_serving_never_writes_to_the_library(library: Path, config: Config):
-    def snapshot() -> dict[str, tuple[int, int]]:
-        return {
-            str(p): (p.stat().st_mtime_ns, p.stat().st_size)
-            for p in [library, *sorted(library.rglob("*"))]
-        }
-
-    before = snapshot()
+    before = library_snapshot(library)
     with TestClient(create_app(library, config, index_on_start=True, web_dir=None)) as c:
         server = server_of(c)
         wait_for(lambda: server.last_finished_at is not None)
@@ -492,7 +530,7 @@ def test_serving_never_writes_to_the_library(library: Path, config: Config):
         c.post("/api/index/rescan")
         wait_for(lambda: not server.indexing)
         c.get("/api/images/1/file")
-    assert snapshot() == before
+    assert library_snapshot(library) == before
 
 
 def test_unindexed_library(tmp_path: Path, config: Config):

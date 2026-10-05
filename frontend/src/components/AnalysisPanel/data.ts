@@ -1,16 +1,16 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import { api, ApiError } from "../../api/client";
-import type { PromptSide, Section } from "../../api/types";
+import { api, ApiError, WARMING_TEXT } from "../../api/client";
+import type { LoraKey, PromptBy, PromptSide, Section } from "../../api/types";
 import { useScope } from "../../lib/scope";
 import { loadingText } from "../../lib/format";
 
-const ALL: Section[] = ["numeric", "categorical", "seeds", "loras", "stacks", "configs"];
+const ALL: Section[] = ["numeric", "categorical", "seeds", "loras", "graph", "configs"];
 
 /** Statistics for the current scope; `lora_key: base_name` is fetched only for the LoRA tab. */
-export function useStats(loraKey: "name" | "base_name" = "name", enabled = true) {
+export function useStats(loraKey: LoraKey = "name", enabled = true) {
   const { scope, key } = useScope();
-  const sections: Section[] = loraKey === "name" ? ALL : ["loras", "stacks"];
+  const sections: Section[] = loraKey === "name" ? ALL : ["loras", "graph"];
   return useQuery({
     queryKey: ["stats", key, loraKey],
     queryFn: () => api.stats({ ...scope, sections, lora_key: loraKey }),
@@ -27,8 +27,6 @@ const warmingRetry = {
   retryDelay: (_count: number, error: Error) => (isWarming(error) ? 2000 : 1000),
 };
 
-export const WARMING_TEXT = "Prompt analysis is warming up…";
-
 /** The note a prompt-analysis query shows in place of its result; `loaded` once it has data. */
 export function promptStatus<Loaded extends string | null>(
   query: { failureReason: Error | null; error: Error | null; data: unknown },
@@ -39,11 +37,7 @@ export function promptStatus<Loaded extends string | null>(
 }
 
 /** Prompt analysis for the current scope; the Overview and Prompts tabs share its cache. */
-export function usePrompts(
-  side: PromptSide,
-  includeTemplate = false,
-  by: "image" | "unique_prompt" = "image",
-) {
+export function usePrompts(side: PromptSide, includeTemplate = false, by: PromptBy = "image") {
   const { scope, key } = useScope();
   return useQuery({
     queryKey: ["prompts", key, side, includeTemplate, by],
@@ -54,7 +48,7 @@ export function usePrompts(
 }
 
 /** Terms that set the selection apart from the rest of the filtered set. */
-export function useDistinctive(side: PromptSide, by: "image" | "unique_prompt") {
+export function useDistinctive(side: PromptSide, by: PromptBy) {
   const { scope, key } = useScope();
   return useQuery({
     queryKey: ["distinctive", key, side, by],

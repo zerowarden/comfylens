@@ -6,9 +6,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import golden_png, ids_by_path, png_with_text, server_of, wait_for, write_file
+from conftest import (
+    flux,
+    golden_png,
+    ids_by_path,
+    png_with_text,
+    server_of,
+    wait_for,
+    write_file,
+)
 from fastapi.testclient import TestClient
-from graph_builder import basic_txt2img
 from PIL import Image
 
 from comfylens.api.app import create_app
@@ -19,19 +26,6 @@ from comfylens.paths import catalog_path, collection_dir, thumbs_dir
 
 T0 = 1_790_000_000
 EVIL = {"Origin": "http://evil.example"}
-
-
-def flux(seed: int, prompt: str, lora: float | None = None) -> bytes:
-    g = basic_txt2img()
-    g.prompt["7"]["inputs"]["seed"] = seed
-    g.prompt["4"]["inputs"]["text"] = prompt
-    if lora is not None:
-        g.node(
-            "20", "LoraLoaderModelOnly", lora_name="fox.safetensors", strength_model=lora,
-            model=("1", 0),
-        )  # fmt: skip
-        g.prompt["7"]["inputs"]["model"] = ["20", 0]
-    return png_with_text({"prompt": g.prompt}, (16, 24))
 
 
 @pytest.fixture

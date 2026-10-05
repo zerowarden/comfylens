@@ -25,7 +25,8 @@ EXIF_PREFIX = b"Exif\x00\x00"
 XMP_PREFIX = b"http://ns.adobe.com/xap/1.0/\x00"
 # SOF0-SOF15, excluding DHT (C4), JPG (C8) and DAC (CC).
 _SOF_MARKERS = frozenset(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
-_STANDALONE = frozenset(range(0xD0, 0xD8)) | {0x01}
+# Markers with no length field: RSTn and TEM.
+STANDALONE_MARKERS = frozenset(range(0xD0, 0xD8)) | {0x01}
 
 _EXIF_IFD = 0x8769
 _USER_COMMENT = 0x9286
@@ -96,7 +97,7 @@ def _scan_segments(view: memoryview) -> _Segments:
         pos += 1
         if marker in (0xDA, 0xD9):  # SOS, EOI
             break
-        if marker in _STANDALONE:
+        if marker in STANDALONE_MARKERS:
             continue
         if pos + 2 > end:
             out.truncated = True

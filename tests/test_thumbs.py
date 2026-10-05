@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from comfylens.index.thumbs import make_thumbnail
+from comfylens.thumbs import make_thumbnail
 
 
 def encode(img: Image.Image, fmt: str, **kwargs) -> bytes:

@@ -18,11 +18,6 @@ from comfylens.collection.store import (
 H1, H2, H3 = "1" * 32, "2" * 32, "3" * 32
 
 
-@pytest.fixture
-def store(tmp_path: Path) -> CollectionStore:
-    return CollectionStore(tmp_path / "collection")
-
-
 def original(store: CollectionStore, data: bytes = b"png bytes") -> str:
     return store.put_original(data, "png", 16, 16, '{"1": {}}', None)
 
@@ -37,7 +32,7 @@ def user_version(path: Path) -> int:
 
 def test_migrates_once_and_reopens(tmp_path: Path):
     store = CollectionStore(tmp_path / "c")
-    assert user_version(store.path) == len(MIGRATIONS) == 1
+    assert user_version(store.path) == len(MIGRATIONS)
     prompt_id = store.create(PromptData(title="kept", positive="a fox"))
     again = CollectionStore(tmp_path / "c")
     assert (again.get(prompt_id) or {})["title"] == "kept"

@@ -2,11 +2,22 @@ import { useMemo, useState } from "react";
 
 import type { Histogram, NumericStats } from "../../api/types";
 import { chartColors, type EChartsOption } from "../../lib/echarts";
-import { fmtInt, fmtNum } from "../../lib/format";
+import { fmtInt, fmtNum, fmtPct } from "../../lib/format";
 import { useUi } from "../../state/ui";
 import Chart from "../Chart";
 import { td, th } from "../ui";
-import { modeText, rangeText } from "./format";
+import { rangeText } from "./format";
+
+/** The mode as a value, or a muted dash when there is no repeated value to report. */
+export function ModeText({ stats }: { stats: NumericStats }) {
+  if (stats.mode.length === 0) return <span className="text-muted">—</span>;
+  const values = stats.mode.map(fmtNum).join(", ");
+  return (
+    <>
+      {values} ({fmtPct(stats.mode_share)}){stats.mode_tied ? " tied" : ""}
+    </>
+  );
+}
 
 function barLabel(bar: { x0: number; x1: number }, kind: Histogram["kind"]): string {
   return kind === "discrete" ? fmtNum(bar.x0) : `${fmtNum(bar.x0)}–${fmtNum(bar.x1)}`;
@@ -121,7 +132,9 @@ export function NumericTable({ stats }: { stats: Record<string, NumericStats> })
               className={`cursor-pointer hover:bg-hover ${open === name ? "bg-accent/10" : ""}`}
             >
               <td className={td}>{name}</td>
-              <td className={td}>{modeText(s)}</td>
+              <td className={td}>
+                <ModeText stats={s} />
+              </td>
               <td className={`${td} tabular-nums`}>{fmtNum(s.median)}</td>
               <td className={`${td} tabular-nums`}>{fmtNum(s.mean)}</td>
               <td className={`${td} whitespace-nowrap tabular-nums`}>{rangeText(s)}</td>

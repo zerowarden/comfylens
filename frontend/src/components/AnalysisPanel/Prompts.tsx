@@ -1,12 +1,20 @@
 import { useState, type ReactNode } from "react";
 
-import type { PromptGroup, PromptSide, TermRow } from "../../api/types";
-import { saveTextToCollection } from "../../lib/collection";
-import { fmtDateTime, fmtInt, fmtPct, loadingText } from "../../lib/format";
+import type { PromptBy, PromptCluster, PromptGroup, PromptSide, TermRow } from "../../api/types";
+import { fmtInt, fmtPct, loadingText } from "../../lib/format";
 import { useFilters } from "../../state/filters";
-import { Glyph } from "../icons";
-import { Button, FilterLink, Heading, Message, Segmented, ShareBar, td } from "../ui";
-import { isWarming, promptStatus, useDistinctive, usePrompts, WARMING_TEXT } from "./data";
+import {
+  Button,
+  FilterLink,
+  Heading,
+  Message,
+  Segmented,
+  ShareBar,
+  ShowAllToggle,
+  td,
+} from "../ui";
+import { WARMING_TEXT } from "../../api/client";
+import { isWarming, promptStatus, useDistinctive, usePrompts } from "./data";
 import Distinctive from "./Distinctive";
 import FamilySections from "./FamilySections";
 import Thumbs from "./Thumbs";
@@ -42,27 +50,76 @@ function Terms({ title, rows }: { title: string; rows: TermRow[] }) {
         </tbody>
       </table>
       {rows.length > 15 && (
-        <button
-          type="button"
-          onClick={() => setAll(!all)}
-          className="text-xs text-link hover:underline"
-        >
-          {all ? "Show fewer" : `Show all ${rows.length}`}
-        </button>
+        <ShowAllToggle count={rows.length} all={all} onToggle={() => setAll(!all)} className="" />
       )}
     </div>
   );
 }
 
-function Group({
-  group,
-  side,
-  distinctive,
-}: {
-  group: PromptGroup;
-  side: PromptSide;
-  distinctive: ReactNode;
-}) {
+/** Near-duplicate sentences; clicking a cluster filters the library to its images. */
+function Clusters({ clusters }: { clusters: PromptCluster[] }) {
+  const update = useFilters((s) => s.update);
+  const active = useFilters((s) => s.filters.sentences);
+  const same = (keys: string[]) =>
+    keys.length === active.length && keys.every((key) => active.includes(key));
+  const filterTo = (keys: string[]) => update((f) => ({ ...f, sentences: same(keys) ? [] : keys }));
+  if (clusters.length === 0) {
+    return <div className="mb-3 text-xs text-muted">No similar sentences in this family.</div>;
+  }
+  return (
+    <div className="mb-3">
+      <Heading>Similar sentences</Heading>
+      <ul className="space-y-1.5 text-xs">
+        {clusters.map((cluster) => {
+          const keys = cluster.members.map((m) => m.key);
+          const selected = same(keys);
+          return (
+            <li
+              key={cluster.key}
+              className={`rounded border p-1.5 ${selected ? "border-accent" : "border-line"}`}
+            >
+              <button
+                type="button"
+                title={selected ? "Clear this filter" : "Filter the library to these images"}
+                onClick={() => filterTo(keys)}
+                className="w-full text-left hover:text-link"
+              >
+                <span className="font-medium tabular-nums">{fmtInt(cluster.images)}</span>{" "}
+                <span className="text-muted">
+                  images in {fmtInt(cluster.prompts)} {cluster.prompts === 1 ? "prompt" : "prompts"}
+                </span>
+                <div className="break-words whitespace-pre-wrap">{cluster.text}</div>
+              </button>
+              <Thumbs ids={cluster.examples} hashes={cluster.example_hashes} />
+              <details className="mt-0.5">
+                <summary className="cursor-pointer text-muted">
+                  {fmtInt(cluster.members.length)} similar sentences
+                </summary>
+                <ul className="mt-0.5 space-y-0.5">
+                  {cluster.members.map((member) => (
+                    <li key={member.key} className="flex items-baseline gap-1.5">
+                      <button
+                        type="button"
+                        title="Filter to this sentence"
+                        onClick={() => filterTo([member.key])}
+                        className="min-w-0 flex-1 text-left text-soft hover:text-link"
+                      >
+                        {member.text}
+                      </button>
+                      <span className="shrink-0 text-muted tabular-nums">{fmtInt(member.df)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function Group({ group, distinctive }: { group: PromptGroup; distinctive: ReactNode }) {
   return (
     <>
       {distinctive}
@@ -92,43 +149,7 @@ function Group({
           <Terms title="Trigrams" rows={group.trigrams} />
         </>
       )}
-      <Heading>Distinct prompts ({fmtInt(group.distinct_total)})</Heading>
-      <ul className="space-y-1.5 text-xs">
-        {group.distinct.map((p) => (
-          <li key={p.key} className="flex items-start gap-1">
-            <details className="group min-w-0 flex-1">
-              <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                <Glyph
-                  name="chevronRight"
-                  className="mr-0.5 size-3 align-[-0.125em] text-muted transition-transform duration-150 group-open:rotate-90"
-                />
-                <span className="tabular-nums">
-                  {fmtInt(p.count)} ({fmtPct(p.share)})
-                </span>{" "}
-                <span className="text-muted">
-                  {fmtDateTime(p.first)} – {fmtDateTime(p.last)}
-                </span>
-                {/* Two lines while closed, the whole prompt once open. */}
-                <div className="line-clamp-2 break-words whitespace-pre-wrap group-open:line-clamp-none">
-                  {p.text || "(empty)"}
-                </div>
-              </summary>
-              <Thumbs ids={p.examples} hashes={p.example_hashes} />
-            </details>
-            {/* Positive prompts only: a negative prompt alone is no style to come back to. */}
-            {side === "positive" && p.text && (
-              <Button
-                className="shrink-0 px-1"
-                title="Save to collection: the images with this prompt are its matches"
-                ariaLabel="Save this prompt to the collection"
-                onClick={() => void saveTextToCollection(p.text)}
-              >
-                <Glyph name="bookmarkPlus" className="size-3.5" />
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
+      <Clusters clusters={group.clusters} />
     </>
   );
 }
@@ -136,7 +157,7 @@ function Group({
 export default function Prompts() {
   const [side, setSide] = useState<PromptSide>("positive");
   const [includeTemplate, setIncludeTemplate] = useState(false);
-  const [by, setBy] = useState<"image" | "unique_prompt">("image");
+  const [by, setBy] = useState<PromptBy>("image");
   const query = usePrompts(side, includeTemplate, by);
   const warming = isWarming(query.failureReason);
 
@@ -185,9 +206,7 @@ export default function Prompts() {
         <Message>{loadingText(query.error)}</Message>
       ) : (
         <FamilySections groups={query.data.groups} count={(g) => g.images}>
-          {(group) => (
-            <Group group={group} side={side} distinctive={distinctiveFor(group.family)} />
-          )}
+          {(group) => <Group group={group} distinctive={distinctiveFor(group.family)} />}
         </FamilySections>
       )}
     </div>

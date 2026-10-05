@@ -69,6 +69,8 @@ def test_aspect(size, expected):
 
 def test_prompt_ws():
     assert prompt_ws("  a\t\tb  c\r\nd  ") == "a b c\nd"
+    # A lone CR folds to LF like the A1111 parser and the sentence splitter do.
+    assert prompt_ws("a\rb") == "a\nb"
 
 
 @pytest.mark.parametrize(

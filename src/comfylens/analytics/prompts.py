@@ -7,6 +7,7 @@ prompt key; a query joins the scope's image count per key onto them and aggregat
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any, Literal
 
 import polars as pl
@@ -15,7 +16,7 @@ import xxhash
 from comfylens.analytics.loras import EXAMPLES, recent_examples
 from comfylens.analytics.text import load_stopwords, sentences, units
 from comfylens.config import PromptsConfig
-from comfylens.extract.normalize import prompt_ws
+from comfylens.extract.normalize import prompt_key
 
 Side = Literal["positive", "negative"]
 # Whether each image counts once, or each distinct prompt does.
@@ -27,6 +28,10 @@ SUBSUME_CANDIDATES = 500
 SUBSUME_SHARE = 0.9
 SMALL_SCOPE = 10  # below this many images, keep terms seen once
 _POOL_THRESHOLD = 5000  # distinct prompts; fewer are segmented in-process
+# Near-duplicate sentences: the number of most frequent sentences compared per family and how
+# many clusters the UI receives. The similarity threshold is prompts.cluster_similarity.
+CLUSTER_CANDIDATES = 100
+TOP_CLUSTERS = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,12 +55,6 @@ def empty_prompt_frames() -> PromptFrames:
         pl.DataFrame(schema=_SENTENCES_SCHEMA),
         pl.DataFrame(schema=_UNITS_SCHEMA),
     )
-
-
-def prompt_key(text: str | None) -> int | None:
-    """xxh3_64 of the whitespace-normalized prompt; None for an empty prompt."""
-    normalized = prompt_ws(text or "")
-    return xxhash.xxh3_64_intdigest(normalized.encode()) if normalized else None
 
 
 def build_prompt_frames(
@@ -203,6 +202,7 @@ def _group(
         pl.col("df") >= (config.min_df if images >= SMALL_SCOPE else 1)
     )
     counts = _drop_subsumed(counts)
+    clusters = _clusters(frames, keyed, sentence_df, excluded, total, config.cluster_similarity)
 
     def terms(kind: str) -> list[dict[str, Any]]:
         top = (
@@ -235,6 +235,7 @@ def _group(
         "unigrams": terms("1g"),
         "bigrams": terms("2g"),
         "trigrams": terms("3g"),
+        "clusters": clusters,
         "distinct": [
             {
                 "key": f"{key:016x}",
@@ -251,6 +252,90 @@ def _group(
             ).iter_rows()
         ],
     }
+
+
+def _similar(left: str, right: str, threshold: float) -> bool:
+    """Near-duplicate sentences by normalized character-level similarity.
+
+    The quick ratios bound `ratio()` from above, so most pairs are rejected cheaply.
+    """
+    matcher = SequenceMatcher(None, left.casefold(), right.casefold())
+    return (
+        matcher.real_quick_ratio() >= threshold
+        and matcher.quick_ratio() >= threshold
+        and matcher.ratio() >= threshold
+    )
+
+
+def _clusters(
+    frames: PromptFrames,
+    keyed: pl.DataFrame,
+    sentence_df: pl.DataFrame,
+    excluded: pl.Series | None,
+    total: int,
+    similarity: float,
+) -> list[dict[str, Any]]:
+    """Groups of near-duplicate sentences, most images first; singletons are dropped.
+
+    Only the CLUSTER_CANDIDATES most frequent sentences are compared pairwise, so the cost
+    stays bounded and one-off sentences (never worth grouping) do not dominate.
+    """
+    candidates = sentence_df
+    if excluded is not None and excluded.len():
+        candidates = candidates.filter(~pl.col("sentence").is_in(excluded.implode()))
+    candidates = candidates.sort("df", "text", descending=[True, False]).head(CLUSTER_CANDIDATES)
+    rows = list(candidates.select("sentence", "text", "df").iter_rows())
+
+    parent = list(range(len(rows)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            if _similar(rows[i][1], rows[j][1], similarity):
+                parent[find(j)] = find(i)
+
+    members: dict[int, list[tuple[int, str, int]]] = {}
+    for i, row in enumerate(rows):
+        members.setdefault(find(i), []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for group in members.values():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda r: (-r[2], r[1]))
+        hashes = [hash_ for hash_, _text, _df in group]
+        matched = keyed.join(
+            frames.sentences.filter(pl.col("sentence").is_in(hashes)).select("key").unique(),
+            on="key",
+        )
+        if matched.height == 0:
+            continue
+        examples = matched.select(
+            recent_examples("id").head(EXAMPLES).implode().alias("examples"),
+            recent_examples("content_hash").head(EXAMPLES).implode().alias("example_hashes"),
+        ).row(0)
+        rep_hash, rep_text, _ = group[0]
+        out.append(
+            {
+                "key": f"{rep_hash:016x}",
+                "text": rep_text,
+                "images": matched.height,
+                "prompts": matched["key"].n_unique(),
+                "members": [
+                    {"key": f"{hash_:016x}", "text": text, "df": df, "share": df / total}
+                    for hash_, text, df in group
+                ],
+                "examples": examples[0],
+                "example_hashes": examples[1],
+            }
+        )
+    out.sort(key=lambda cluster: (-cluster["images"], cluster["text"]))
+    return out[:TOP_CLUSTERS]
 
 
 def _drop_subsumed(counts: pl.DataFrame) -> pl.DataFrame:

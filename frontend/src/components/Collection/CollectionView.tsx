@@ -1,21 +1,16 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
-import { api, EXPORT_URL } from "../../api/client";
+import { EXPORT_URL } from "../../api/client";
 import type { PromptSummary } from "../../api/types";
-import { draftFiles, emptySettings, imageFiles, importCollection } from "../../lib/collection";
+import { draftFiles, importCollection, useCollectionList } from "../../lib/collection";
+import { emptySettings, imageFiles } from "../../lib/draft";
+import { IMAGE_ACCEPT, hasFiles, isTyping } from "../../lib/dom";
 import { fmtInt } from "../../lib/format";
 import { useDebounced } from "../../lib/hooks";
 import { useCollection } from "../../state/collection";
 import { Glyph } from "../icons";
-import { Button, FIELD, FamilyDot, LINK_BUTTON, Thumbnail } from "../ui";
-
-const ACCEPT = "image/png,image/jpeg,image/webp";
-
-function isTyping(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-}
+import { Button, ErrorState, FIELD, FamilyDot, LINK_BUTTON, Thumbnail } from "../ui";
 
 function Card({ prompt }: { prompt: PromptSummary }) {
   const openPrompt = useCollection((s) => s.openPrompt);
@@ -65,11 +60,7 @@ export default function CollectionView() {
   const archiveInput = useRef<HTMLInputElement>(null);
   const client = useQueryClient();
   const openEditor = useCollection((s) => s.openEditor);
-  const list = useQuery({
-    queryKey: ["collection", "list", q, tag, family],
-    queryFn: () => api.collection({ q, tag, family }),
-    placeholderData: keepPreviousData,
-  });
+  const list = useCollectionList({ q, tag, family });
 
   // Paste an image anywhere in the view, except into a text field or over an open dialog.
   useEffect(() => {
@@ -85,7 +76,6 @@ export default function CollectionView() {
     return () => window.removeEventListener("paste", onPaste);
   }, []);
 
-  const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
   const data = list.data;
   const filtered = text.trim() !== "" || tag !== null || family !== null;
   return (
@@ -175,7 +165,7 @@ export default function CollectionView() {
         <input
           ref={fileInput}
           type="file"
-          accept={ACCEPT}
+          accept={IMAGE_ACCEPT}
           multiple
           hidden
           onChange={(e) => {
@@ -212,7 +202,7 @@ export default function CollectionView() {
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {list.isError && <div className="p-4 text-danger">{list.error.message}</div>}
+        {list.isError && <ErrorState error={list.error} />}
         {data && data.items.length === 0 && (
           <div className="mx-auto max-w-md p-8 text-center text-muted">
             {filtered ? (

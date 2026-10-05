@@ -39,6 +39,9 @@ import type {
 } from "./types";
 import { attachmentName } from "../lib/files";
 
+/** Shown wherever a prompt-analysis query is still warming up. */
+export const WARMING_TEXT = "Prompt analysis is warming up…";
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -95,8 +98,7 @@ async function parse<T>(response: Response): Promise<T> {
   }
   if (payload && typeof payload === "object") {
     const p = payload as { warming?: boolean; error?: { code?: string; message?: string } };
-    if (p.warming)
-      throw new ApiError(response.status, "warming", "Prompt analysis is warming up", true);
+    if (p.warming) throw new ApiError(response.status, "warming", WARMING_TEXT, true);
     if (p.error) {
       throw new ApiError(response.status, p.error.code ?? "error", p.error.message ?? "");
     }

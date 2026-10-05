@@ -140,7 +140,7 @@ def extract(
     if primary is None:
         generator = _generator_prompt(graph, reach)
         warnings += generator.warnings if generator else []
-        positive = _prompt(generator)
+        positive = generator.prompt if generator else None
         family = match_family(
             config.families,
             loader_kind=None,
@@ -286,10 +286,6 @@ def _generator_prompt(graph: Graph, reach: Reachability) -> SideTrace | None:
         side.warnings.append(Warn(Code.MULTIPLE_PROMPT_SOURCES, None, message))
     side.prompt = "\n\n".join(texts) if texts else None
     return side
-
-
-def _prompt(side: SideTrace | None) -> str | None:
-    return side.prompt if side else None
 
 
 def _first[T](values: list[T | None]) -> T | None:

@@ -13,14 +13,15 @@ from typing import Any
 from PIL import Image
 
 from comfylens.collection.a1111 import parse_parameters
-from comfylens.collection.store import CollectionStore, OriginalFormat
+from comfylens.collection.models import PROMPT_SETTING_KEYS, OriginalFormat, saved_lora
+from comfylens.collection.store import CollectionStore
 from comfylens.config import Config
 from comfylens.extract.normalize import prompt_ws
 from comfylens.extract.pipeline import analyze
 from comfylens.extract.types import Extraction
-from comfylens.index.thumbs import make_thumbnail
 from comfylens.metadata.jpeg import decode_user_comment
 from comfylens.paths import thumb_path, thumbs_dir
+from comfylens.thumbs import make_thumbnail
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 TITLE_CHARS = 60
@@ -49,8 +50,7 @@ def suggest_title(positive: str) -> str:
 
 
 def empty_settings() -> dict[str, Any]:
-    keys = ("base_model", "seed", "steps", "cfg", "sampler_name", "scheduler", "denoise")
-    return {**dict.fromkeys(keys), "guidance": None, "shift": None, "loras": []}
+    return {**dict.fromkeys(PROMPT_SETTING_KEYS), "loras": []}
 
 
 def settings_of(e: Extraction) -> dict[str, Any]:
@@ -63,13 +63,7 @@ def settings_of(e: Extraction) -> dict[str, Any]:
         if not (lora.reachable and lora.enabled) or (lora.node_id, lora.entry) in seen:
             continue
         seen.add((lora.node_id, lora.entry))
-        loras.append(
-            {
-                "name": lora.name,
-                "strength_model": lora.strength_model,
-                "strength_clip": lora.strength_clip,
-            }
-        )
+        loras.append(saved_lora(lora.name, lora.strength_model, lora.strength_clip))
     return {
         "base_model": e.base_model,
         "seed": str(p.seed) if p and p.seed is not None else None,

@@ -4,7 +4,7 @@ import re
 from collections.abc import Sequence
 
 from comfylens.extract.model_chain import ModelChain
-from comfylens.extract.normalize import lora_base_step, lora_name
+from comfylens.extract.normalize import lora_base_step, model_stem
 from comfylens.extract.registry import REGISTRY, Role, role_of
 from comfylens.extract.types import LoraUse
 from comfylens.extract.values import as_float, read_float, read_str
@@ -51,7 +51,7 @@ def _uses(
 ) -> list[LoraUse]:
     uses = []
     for entry, name_raw, strength_model, strength_clip, enabled in _read(graph, node):
-        name = lora_name(name_raw)
+        name = model_stem(name_raw)
         base_name, step = lora_base_step(name, step_suffix)
         uses.append(
             LoraUse(

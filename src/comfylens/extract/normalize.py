@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+import xxhash
+
 _MODEL_EXTENSIONS = (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf", ".sft")
 _ASPECTS = [(1, 1), (4, 5), (3, 4), (2, 3), (9, 16), (9, 21)]
 _ASPECTS += [(h, w) for w, h in _ASPECTS if w != h]
@@ -16,9 +18,6 @@ def model_stem(name: str) -> str:
         if lower.endswith(ext):
             return stem[: -len(ext)]
     return stem
-
-
-lora_name = model_stem
 
 
 def lora_base_step(name: str, step_suffix: re.Pattern[str]) -> tuple[str, int | None]:
@@ -56,5 +55,12 @@ def size_facts(width: int | None, height: int | None) -> dict[str, Any]:
 
 
 def prompt_ws(text: str) -> str:
-    """Identity key for distinct prompts: strip, CRLF to LF, collapse spaces and tabs."""
-    return _SPACES.sub(" ", text.strip().replace("\r\n", "\n"))
+    """Identity key for distinct prompts: strip, CRLF and lone CR to LF, collapse spaces
+    and tabs."""
+    return _SPACES.sub(" ", text.strip().replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def prompt_key(text: str | None) -> int | None:
+    """xxh3_64 of the whitespace-normalized prompt; None for an empty prompt."""
+    normalized = prompt_ws(text or "")
+    return xxhash.xxh3_64_intdigest(normalized.encode()) if normalized else None

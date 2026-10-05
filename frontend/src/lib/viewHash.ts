@@ -18,3 +18,9 @@ export function viewHash({ view, promptId }: ViewState): string {
   if (view === "library") return "";
   return promptId === null ? "#collection" : `#collection/${promptId}`;
 }
+
+/** The view state from the current URL, for the stores' initial values. */
+export function initialViewState(): ViewState {
+  if (typeof window === "undefined") return { view: "library", promptId: null };
+  return parseViewHash(window.location.hash);
+}

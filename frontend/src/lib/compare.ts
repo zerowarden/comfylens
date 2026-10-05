@@ -1,7 +1,8 @@
 /** Side-by-side comparison of two images' normalized settings and LoRA chains. */
 
 import type { DetailLora, DetailStage, ImageDetail } from "../api/types";
-import { fmtDateTime, fmtNum } from "./format";
+import { MISSING, fmtDateTime, fmtNum, text } from "./format";
+import { SETTING_LABELS } from "./settings";
 
 export interface FieldRow {
   label: string;
@@ -14,13 +15,6 @@ export interface FieldValue {
   label: string;
   value: string;
 }
-
-const MISSING = "—";
-
-const text = (v: string | number | null | undefined): string =>
-  v === null || v === undefined || v === "" ? MISSING : String(v);
-const number = (v: number | null | undefined): string =>
-  v === null || v === undefined ? MISSING : fmtNum(v);
 
 function resolution(d: ImageDetail): string {
   const f = d.file;
@@ -35,18 +29,18 @@ function resolution(d: ImageDetail): string {
 const FIELDS: [string, (d: ImageDetail) => string][] = [
   ["status", (d) => (d.file.error ? `${d.file.status}: ${d.file.error}` : d.file.status)],
   ["family", (d) => text(d.generation?.model_family)],
-  ["base model", (d) => text(d.generation?.base_model)],
+  [SETTING_LABELS.base_model, (d) => text(d.generation?.base_model)],
   ["text encoder", (d) => text(d.generation?.text_encoder)],
   ["clip type", (d) => text(d.generation?.clip_type)],
   ["vae", (d) => text(d.generation?.vae)],
-  ["sampler", (d) => text(d.generation?.sampler_name)],
-  ["scheduler", (d) => text(d.generation?.scheduler)],
-  ["steps", (d) => text(d.generation?.steps)],
-  ["cfg", (d) => number(d.generation?.cfg)],
-  ["denoise", (d) => number(d.generation?.denoise)],
-  ["guidance", (d) => number(d.generation?.guidance)],
-  ["shift", (d) => number(d.generation?.shift)],
-  ["seed", (d) => text(d.generation?.seed)],
+  [SETTING_LABELS.sampler_name, (d) => text(d.generation?.sampler_name)],
+  [SETTING_LABELS.scheduler, (d) => text(d.generation?.scheduler)],
+  [SETTING_LABELS.steps, (d) => text(d.generation?.steps)],
+  [SETTING_LABELS.cfg, (d) => fmtNum(d.generation?.cfg)],
+  [SETTING_LABELS.denoise, (d) => fmtNum(d.generation?.denoise)],
+  [SETTING_LABELS.guidance, (d) => fmtNum(d.generation?.guidance)],
+  [SETTING_LABELS.shift, (d) => fmtNum(d.generation?.shift)],
+  [SETTING_LABELS.seed, (d) => text(d.generation?.seed)],
   ["stages", (d) => text(d.generation?.stage_count)],
   ["latent source", (d) => text(d.generation?.latent_source)],
   ["batch size", (d) => text(d.generation?.batch_size)],
@@ -68,12 +62,12 @@ export function settingsRows(d: ImageDetail): FieldValue[] {
 /** What a later stage ran with; the image-level rows already describe the primary stage. */
 const STAGE_FIELDS: [string, (s: DetailStage) => string][] = [
   ["family", (s) => s.model_family],
-  ["base model", (s) => text(s.base_model)],
-  ["sampler", (s) => `${text(s.sampler_name)} / ${text(s.scheduler)}`],
-  ["steps", (s) => text(s.steps)],
-  ["cfg", (s) => number(s.cfg)],
-  ["denoise", (s) => number(s.denoise)],
-  ["seed", (s) => text(s.seed)],
+  [SETTING_LABELS.base_model, (s) => text(s.base_model)],
+  [SETTING_LABELS.sampler_name, (s) => `${text(s.sampler_name)} / ${text(s.scheduler)}`],
+  [SETTING_LABELS.steps, (s) => text(s.steps)],
+  [SETTING_LABELS.cfg, (s) => fmtNum(s.cfg)],
+  [SETTING_LABELS.denoise, (s) => fmtNum(s.denoise)],
+  [SETTING_LABELS.seed, (s) => text(s.seed)],
   ["LoRA stack", (s) => s.lora_stack_key],
   ["prompt", (s) => text(s.positive_prompt)],
 ];
@@ -115,9 +109,9 @@ export interface LoraComparison {
 
 /** The strength as both views show it: model, plus clip when they differ. */
 export function strengthLabel(l: DetailLora): string {
-  const model = number(l.strength_model);
+  const model = fmtNum(l.strength_model);
   const clip = l.strength_clip;
-  return clip !== null && clip !== l.strength_model ? `${model} / clip ${number(clip)}` : model;
+  return clip !== null && clip !== l.strength_model ? `${model} / clip ${fmtNum(clip)}` : model;
 }
 
 /** The LoRAs a stage applied: on its model chain and switched on, in chain order. */

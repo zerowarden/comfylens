@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { DistinctiveGroup, DistinctiveTerm } from "../../api/types";
 import { fmtPct } from "../../lib/format";
 import { useFilters } from "../../state/filters";
-import { FilterLink, Heading, Segmented } from "../ui";
+import { FilterLink, Heading, Segmented, ShareBar, ShowAllToggle } from "../ui";
 
 /** |z| at or above this is unlikely by chance (two-sided 5%). */
 const NOTABLE_Z = 1.96;
@@ -56,12 +56,11 @@ function Column({
                   {t.term}
                 </FilterLink>
                 <div className="flex items-center gap-1.5">
-                  <div className="h-1.5 flex-1 rounded bg-track">
-                    <div
-                      className={`h-1.5 rounded ${tone === "selection" ? "bg-accent" : "bg-warning"}`}
-                      style={{ width: `${Math.min(100, (Math.abs(t.z) / top) * 100)}%` }}
-                    />
-                  </div>
+                  <ShareBar
+                    share={Math.abs(t.z) / top}
+                    tone={tone === "selection" ? "accent" : "warning"}
+                    className="flex-1"
+                  />
                   <span className="shrink-0 text-muted tabular-nums">
                     {fmtPct(t.selection_share)} vs {fmtPct(t.rest_share)}
                   </span>
@@ -72,13 +71,12 @@ function Column({
         </ul>
       )}
       {terms.length > 12 && (
-        <button
-          type="button"
-          onClick={() => setAll(!all)}
-          className="mt-1 text-xs text-link hover:underline"
-        >
-          {all ? "Show fewer" : `Show all ${terms.length}`}
-        </button>
+        <ShowAllToggle
+          count={terms.length}
+          all={all}
+          onToggle={() => setAll(!all)}
+          className="mt-1"
+        />
       )}
     </div>
   );

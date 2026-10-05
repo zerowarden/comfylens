@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { parseViewHash, type View } from "../lib/viewHash";
+import { initialViewState, type View } from "../lib/viewHash";
 
 export type Tab = "overview" | "loras" | "configs" | "prompts" | "resolution" | "advanced";
 export type Theme = "dark" | "light";
@@ -35,6 +35,8 @@ interface UiStore {
   view: View;
   tileSize: number;
   detailId: number | null;
+  /** The image the detail view keeps on screen while it fades out after closing. */
+  lastDetailId: number | null;
   /** The two images of the Compare view, in grid order; null when it is closed. */
   compareIds: [number, number] | null;
   theme: Theme;
@@ -46,6 +48,8 @@ interface UiStore {
   setView: (view: View) => void;
   setTileSize: (size: number) => void;
   openDetail: (id: number | null) => void;
+  /** Drops the faded-out image once the detail view's exit animation has run. */
+  dropDetail: () => void;
   openCompare: (ids: [number, number] | null) => void;
   toggleTheme: () => void;
   setPanelOpen: (open: boolean) => void;
@@ -64,13 +68,16 @@ function clampPanel(width: number): number {
   return Math.min(PANEL_MAX, Math.max(PANEL_MIN, width));
 }
 
-const initialTheme = stored<Theme>("comfylens.theme", "dark", ["dark", "light"]);
+const THEME_KEY = "comfylens.theme";
+
+const initialTheme = stored<Theme>(THEME_KEY, "dark", ["dark", "light"]);
 applyTheme(initialTheme);
 
 export const useUi = create<UiStore>((set) => ({
-  view: typeof window === "undefined" ? "library" : parseViewHash(window.location.hash).view,
+  view: initialViewState().view,
   tileSize: 180,
   detailId: null,
+  lastDetailId: null,
   compareIds: null,
   theme: initialTheme,
   panelOpen: true,
@@ -79,12 +86,15 @@ export const useUi = create<UiStore>((set) => ({
   tab: "overview",
   setView: (view) => set({ view }),
   setTileSize: (tileSize) => set({ tileSize: Math.min(TILE_MAX, Math.max(TILE_MIN, tileSize)) }),
-  openDetail: (detailId) => set({ detailId }),
+  // Closing keeps the id around: the view stays on screen until it has faded out.
+  openDetail: (detailId) =>
+    set(detailId === null ? { detailId } : { detailId, lastDetailId: detailId }),
+  dropDetail: () => set({ lastDetailId: null }),
   openCompare: (compareIds) => set({ compareIds }),
   toggleTheme: () =>
     set((s) => {
       const theme: Theme = s.theme === "dark" ? "light" : "dark";
-      remember("comfylens.theme", theme);
+      remember(THEME_KEY, theme);
       applyTheme(theme);
       return { theme };
     }),

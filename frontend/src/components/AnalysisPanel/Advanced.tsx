@@ -8,8 +8,8 @@ import { useScope } from "../../lib/scope";
 import { FIELD, Message, td, th } from "../ui";
 import CategoricalTable from "./Categorical";
 import FamilySections from "./FamilySections";
-import { modeText, rangeText } from "./format";
-import { HistogramChart } from "./Numeric";
+import { rangeText } from "./format";
+import { HistogramChart, ModeText } from "./Numeric";
 
 const keyOf = (k: Pick<NodeInputKey, "class_type" | "input_name">) =>
   `${k.class_type}.${k.input_name}`;
@@ -41,7 +41,9 @@ function KeyStats({ chosen }: { chosen: NodeInputKey }) {
                 </thead>
                 <tbody>
                   <tr>
-                    <td className={td}>{modeText(group.numeric)}</td>
+                    <td className={td}>
+                      <ModeText stats={group.numeric} />
+                    </td>
                     <td className={`${td} tabular-nums`}>{fmtNum(group.numeric.median)}</td>
                     <td className={`${td} tabular-nums`}>{fmtNum(group.numeric.mean)}</td>
                     <td className={`${td} tabular-nums`}>{rangeText(group.numeric)}</td>

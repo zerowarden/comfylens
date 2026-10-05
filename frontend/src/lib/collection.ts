@@ -1,25 +1,37 @@
-import type { QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, type QueryClient } from "@tanstack/react-query";
 
 import { api } from "../api/client";
-import type {
-  CollectionImage,
-  Draft,
-  ImportResponse,
-  PromptInput,
-  PromptSettings,
-  SavedLora,
-  SavedPrompt,
-} from "../api/types";
+import type { Draft, ImportResponse } from "../api/types";
 import { useCollection } from "../state/collection";
 import { useFileActions } from "../state/fileActions";
 import { emptyFilters, useFilters } from "../state/filters";
 import { useSelection } from "../state/selection";
 import { useUi } from "../state/ui";
+import { seedDraft } from "./draft";
 import { chunks, TRASH_BATCH } from "./files";
-import { fmtInt } from "./format";
-import { viewHash } from "./viewHash";
+import { errorText, fmtInt, plural } from "./format";
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** The saved-prompt list, with one cache key and one stale-data behavior everywhere. */
+export function useCollectionList(
+  params: { q?: string; tag?: string | null; family?: string | null } = {},
+) {
+  const { q = "", tag = null, family = null } = params;
+  return useQuery({
+    queryKey: ["collection", "list", q, tag, family],
+    queryFn: () => api.collection({ q, tag, family }),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** One saved prompt by id; the query is disabled while `id` is null. */
+export function useSavedPrompt(id: number | null) {
+  return useQuery({
+    queryKey: ["collection", "prompt", id],
+    queryFn: () => api.savedPrompt(id!),
+    enabled: id !== null,
+    retry: false,
+  });
+}
 
 /**
  * After a collection write: refetch the collection and the grid pages (their saved badges). When
@@ -35,80 +47,6 @@ export function refreshAfterCollectionWrite(client: QueryClient): void {
       return head === "collection" || head === "page" || (scoped && !keep.has(head));
     },
   });
-}
-
-/**
- * Several dropped files make one prompt: the first draft with generation metadata (else the
- * first) gives the text and settings, and every image becomes a reference, in drop order.
- */
-export function seedDraft(drafts: Draft[]): { draft: Draft; references: CollectionImage[] } | null {
-  const first = drafts.find((d) => d.metadata !== "none") ?? drafts[0];
-  if (!first) return null;
-  const seen = new Set<string>();
-  const references: CollectionImage[] = [];
-  for (const d of drafts) {
-    if (d.original && !seen.has(d.original.content_hash)) {
-      seen.add(d.original.content_hash);
-      references.push(d.original);
-    }
-  }
-  return { draft: first, references };
-}
-
-/** Tags typed as "a, b , a" -> ["a", "b"]; the server normalizes case and spacing again. */
-export function parseTags(text: string): string[] {
-  const out: string[] = [];
-  for (const raw of text.split(",")) {
-    const tag = raw.trim().replace(/\s+/g, " ").toLowerCase();
-    if (tag && !out.includes(tag)) out.push(tag);
-  }
-  return out;
-}
-
-export function emptySettings(): PromptSettings {
-  return {
-    base_model: null,
-    seed: null,
-    steps: null,
-    cfg: null,
-    sampler_name: null,
-    scheduler: null,
-    denoise: null,
-    guidance: null,
-    shift: null,
-    loras: [],
-  };
-}
-
-/** The editable fields of a saved prompt, as the editor starts with them. */
-export function inputOf(prompt: SavedPrompt): PromptInput {
-  return {
-    title: prompt.title,
-    positive: prompt.positive,
-    negative: prompt.negative,
-    notes: prompt.notes,
-    source_url: prompt.source_url,
-    model_family: prompt.model_family,
-    tags: prompt.tags,
-    settings: prompt.settings,
-    references: prompt.references.map((r) => r.content_hash),
-    attempts: [],
-  };
-}
-
-export function inputOfDraft(draft: Draft, references: CollectionImage[]): PromptInput {
-  return {
-    title: draft.title,
-    positive: draft.positive,
-    negative: draft.negative,
-    notes: "",
-    source_url: null,
-    model_family: draft.model_family,
-    tags: [],
-    settings: draft.settings,
-    references: references.map((r) => r.content_hash),
-    attempts: [],
-  };
 }
 
 /** Open the editor on a draft of a library image. */
@@ -139,21 +77,39 @@ export async function saveTextToCollection(positive: string): Promise<void> {
   }
 }
 
-/** Open the editor on drafts of dropped, picked or pasted files, uploaded one at a time. */
-export async function draftFiles(files: File[]): Promise<void> {
-  const { notify } = useFileActions.getState();
+/**
+ * Upload files one at a time; a failed file becomes a "<name>: <message>" failure. `hooks`
+ * report progress and let a caller use each draft as soon as it is stored.
+ */
+export async function uploadDrafts(
+  files: File[],
+  hooks: { onDraft?: (draft: Draft) => void; onFile?: (index: number) => void } = {},
+): Promise<{ drafts: Draft[]; failures: string[] }> {
   const drafts: Draft[] = [];
   const failures: string[] = [];
   for (const [i, file] of files.entries()) {
-    if (files.length > 1) {
-      notify({ text: `Reading ${i + 1} of ${files.length} images`, tone: "info", sticky: true });
-    }
     try {
-      drafts.push(await api.draftFromFile(file));
+      const draft = await api.draftFromFile(file);
+      drafts.push(draft);
+      hooks.onDraft?.(draft);
     } catch (e) {
       failures.push(`${file.name || "pasted image"}: ${errorText(e)}`);
     }
+    hooks.onFile?.(i);
   }
+  return { drafts, failures };
+}
+
+/** Open the editor on drafts of dropped, picked or pasted files, uploaded one at a time. */
+export async function draftFiles(files: File[]): Promise<void> {
+  const { notify } = useFileActions.getState();
+  const { drafts, failures } = await uploadDrafts(files, {
+    onFile: (i) => {
+      if (files.length > 1) {
+        notify({ text: `Reading ${i + 1} of ${files.length} images`, tone: "info", sticky: true });
+      }
+    },
+  });
   if (failures.length > 0) notify({ text: failures.join("; "), tone: "error" });
   else if (files.length > 1) notify(null);
   const seeded = seedDraft(drafts);
@@ -198,105 +154,13 @@ export function openSavedPrompt(promptId: number): void {
   useCollection.getState().openPrompt(promptId);
 }
 
-/** Keep the view and the open saved prompt in the URL hash. */
-export function syncViewToUrl(): () => void {
-  const write = () => {
-    const hash = viewHash({
-      view: useUi.getState().view,
-      promptId: useCollection.getState().openId,
-    });
-    if (hash === window.location.hash) return;
-    const url = `${window.location.pathname}${window.location.search}${hash}`;
-    window.history.replaceState(null, "", url);
-  };
-  const stopUi = useUi.subscribe(write);
-  const stopCollection = useCollection.subscribe(write);
-  return () => {
-    stopUi();
-    stopCollection();
-  };
-}
-
-/** A saved prompt's known settings as label/value rows, in a fixed order; LoRAs excluded. */
-export function promptSettingsRows(s: PromptSettings): { label: string; value: string }[] {
-  const rows: [string, string | number | null][] = [
-    ["base model", s.base_model],
-    ["sampler", s.sampler_name],
-    ["scheduler", s.scheduler],
-    ["steps", s.steps],
-    ["cfg", s.cfg],
-    ["guidance", s.guidance],
-    ["shift", s.shift],
-    ["denoise", s.denoise],
-    ["seed", s.seed],
-  ];
-  return rows
-    .filter((row): row is [string, string | number] => row[1] !== null && row[1] !== "")
-    .map(([label, value]) => ({ label, value: String(value) }));
-}
-
-/** "fox 0.8", or "fox 0.8 / 1" when the clip strength differs. */
-export function loraText(l: SavedLora): string {
-  const model = l.strength_model ?? "?";
-  const clip = l.strength_clip !== null && l.strength_clip !== l.strength_model;
-  return `${l.name} ${model}${clip ? ` / ${l.strength_clip}` : ""}`;
-}
-
-/** The editor fields an added image's metadata can fill in. */
-export interface DraftFields {
-  title: string;
-  positive: string;
-  negative: string;
-  family: string;
-  settings: PromptSettings;
-}
-
-function settingsEmpty(s: PromptSettings): boolean {
-  return s.loras.length === 0 && promptSettingsRows(s).length === 0;
-}
-
-/** References with the drafts' images appended, in order, without duplicates. */
-export function appendReferences(
-  references: CollectionImage[],
-  drafts: Draft[],
-): CollectionImage[] {
-  const out = [...references];
-  for (const d of drafts) {
-    if (d.original && !out.some((r) => r.content_hash === d.original!.content_hash)) {
-      out.push(d.original);
-    }
-  }
-  return out;
-}
-
-/**
- * Fill the fields the user left empty from the first added image that carries generation
- * metadata; never overwrite what is already there.
- */
-export function fillEmptyFields(fields: DraftFields, drafts: Draft[]): DraftFields {
-  const source = drafts.find((d) => d.metadata !== "none");
-  if (!source) return fields;
-  return {
-    title: fields.title.trim() ? fields.title : source.title,
-    positive: fields.positive.trim() ? fields.positive : source.positive,
-    negative: fields.negative.trim() ? fields.negative : source.negative,
-    family: fields.family.trim() ? fields.family : (source.model_family ?? ""),
-    settings: settingsEmpty(fields.settings) ? source.settings : fields.settings,
-  };
-}
-
-/** Image files among dropped or pasted ones. */
-export function imageFiles(files: Iterable<File>): File[] {
-  return [...files].filter((f) => f.type === "" || f.type.startsWith("image/"));
-}
-
 /** "Imported 3 prompts (2 were already here)", from an import's counts. */
 export function importSummary(r: ImportResponse): string {
-  const plural = (n: number) => `${fmtInt(n)} ${n === 1 ? "prompt" : "prompts"}`;
+  const prompts = (n: number) => plural(n, "prompt");
   if (r.added === 0 && r.skipped === 0) return "The archive holds no prompts";
-  if (r.added === 0) return `Nothing new: all ${plural(r.skipped)} were already here`;
+  if (r.added === 0) return `Nothing new: all ${prompts(r.skipped)} were already here`;
   const already = r.skipped > 0 ? ` (${fmtInt(r.skipped)} already here)` : "";
-  return `Imported ${plural(r.added)}${already}`;
+  return `Imported ${prompts(r.added)}${already}`;
 }
 
 /** Add an exported archive's prompts to the collection and report what changed. */

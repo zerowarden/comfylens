@@ -2,7 +2,6 @@ import { useState } from "react";
 
 import type { DistinctPrompt, PromptGroup } from "../../api/types";
 import { fmtInt, fmtPct } from "../../lib/format";
-import { useUi } from "../../state/ui";
 import { CopyButton, Heading } from "../ui";
 
 const SHOWN = 3;
@@ -32,7 +31,6 @@ function Entry({ prompt, counted }: { prompt: DistinctPrompt; counted: boolean }
 }
 
 function Side({ title, group }: { title: string; group: PromptGroup | undefined }) {
-  const setTab = useUi((s) => s.setTab);
   const prompts = group?.distinct.filter((p) => p.text.trim() !== "") ?? [];
   if (prompts.length === 0) return null;
   const several = group !== undefined && group.distinct_total > 1;
@@ -41,18 +39,9 @@ function Side({ title, group }: { title: string; group: PromptGroup | undefined 
       <div className="mb-0.5 flex items-baseline gap-2">
         <span className="font-semibold text-muted">{title}</span>
         {several && (
-          <>
-            <span className="text-muted">
-              {fmtInt(Math.min(SHOWN, prompts.length))} of {fmtInt(group.distinct_total)} distinct
-            </span>
-            <button
-              type="button"
-              onClick={() => setTab("prompts")}
-              className="text-link hover:underline"
-            >
-              All in Prompts
-            </button>
-          </>
+          <span className="text-muted">
+            {fmtInt(Math.min(SHOWN, prompts.length))} of {fmtInt(group.distinct_total)} distinct
+          </span>
         )}
       </div>
       <ul className="space-y-1">

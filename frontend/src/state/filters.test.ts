@@ -31,6 +31,7 @@ describe("URL sync", () => {
       has_warnings: false,
       saved: true,
       saved_prompt: 12,
+      sentences: ["0123456789abcdef", "fedcba9876543210"],
     };
     const sort = { key: "cfg" as const, descending: false };
     const search = toSearch(filters, sort);
@@ -38,6 +39,7 @@ describe("URL sync", () => {
     expect(search).toContain("lora_mode=all");
     expect(search).toContain("saved=yes");
     expect(search).toContain("prompt=12");
+    expect(search).toContain("sentence=0123456789abcdef");
     expect(fromSearch(search)).toEqual({ filters, sort });
     expect(fromSearch(`?${search}`)).toEqual({ filters, sort });
   });
@@ -65,6 +67,13 @@ describe("URL sync", () => {
   it("counts the collection filters as active", () => {
     expect(hasActiveFilters({ ...emptyFilters(), saved: false })).toBe(true);
     expect(hasActiveFilters({ ...emptyFilters(), saved_prompt: 3 })).toBe(true);
+    expect(hasActiveFilters({ ...emptyFilters(), sentences: ["0123456789abcdef"] })).toBe(true);
+  });
+
+  it("accepts only 16-hex-digit sentence hashes", () => {
+    expect(fromSearch("sentence=0123456789abcdef&sentence=nope").filters.sentences).toEqual([
+      "0123456789abcdef",
+    ]);
   });
 });
 

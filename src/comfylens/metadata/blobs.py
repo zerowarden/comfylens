@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from comfylens.metadata.types import MAX_TEXT_BYTES, Kind
+from comfylens.metadata.types import MAX_TEXT_BYTES, Kind, is_api_node
 from comfylens.warn import Code, Warn
 
 # What a key name claims its value is. Keys from other probes ("UserComment", ...) claim nothing.
@@ -31,14 +31,6 @@ class Classified:
 def base_key(key: str) -> str:
     """Strip the `#2` suffix that keeps repeated keys from different probes apart."""
     return key.partition("#")[0]
-
-
-def is_api_node(value: Any) -> bool:
-    return (
-        isinstance(value, dict)
-        and isinstance(value.get("class_type"), str)
-        and isinstance(value.get("inputs"), dict)
-    )
 
 
 def shape_of(obj: Any) -> Kind:

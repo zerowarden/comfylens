@@ -3,8 +3,9 @@ from typing import Literal
 import polars as pl
 import pytest
 
-from comfylens.analytics.prompts import Side, analyze_prompts, build_prompt_frames, prompt_key
+from comfylens.analytics.prompts import Side, analyze_prompts, build_prompt_frames
 from comfylens.config import PromptsConfig, build_config
+from comfylens.extract.normalize import prompt_key
 
 TEMPLATE = "Preserve the subject's identity and pose."
 
@@ -41,6 +42,7 @@ def terms(group, kind):
 
 def test_prompt_key_ignores_whitespace_differences():
     assert prompt_key("a  cat\r\n") == prompt_key("a cat")
+    assert prompt_key("a\rb") == prompt_key("a\nb")
     assert prompt_key("   ") is None and prompt_key(None) is None
 
 
@@ -101,6 +103,28 @@ def test_subsumption_drops_contained_ngrams(cfg):
     assert "realistic" not in terms(g, "unigrams")
     assert "photograph" not in terms(g, "unigrams")
     assert "cat" not in terms(g, "unigrams")  # df 1 < min_df
+
+
+def test_similar_sentences_cluster_and_singletons_do_not(cfg):
+    rows = [
+        (1, "a red fox in the snow", None),
+        (2, "a red fox in the snow at night", None),
+        (3, "an owl on a branch", None),
+        (4, "an owl on a branch at dusk", None),
+        (5, "a blue whale", None),
+    ]
+    g = run(rows, cfg)
+    clusters = {c["text"]: c for c in g["clusters"]}
+    assert set(clusters) == {"a red fox in the snow", "an owl on a branch"}
+    fox = clusters["a red fox in the snow"]
+    assert {m["text"] for m in fox["members"]} == {
+        "a red fox in the snow",
+        "a red fox in the snow at night",
+    }
+    assert (fox["images"], fox["prompts"]) == (2, 2)
+    assert fox["examples"] == [2, 1]  # most recent first
+    assert all(len(m["key"]) == 16 for m in fox["members"])
+    assert "a blue whale" not in clusters  # a one-off sentence is not a cluster
 
 
 def test_by_unique_prompt_and_distinct_prompts(cfg):

@@ -1,19 +1,14 @@
-import json
 from io import BytesIO
 
 import pytest
+from conftest import API_PROMPT as API
+from conftest import API_TEXT
+from conftest import jpeg_segment as segment
 from PIL import Image
 
 from comfylens.metadata import read_metadata
 from comfylens.metadata.jpeg import XMP_PREFIX, NotJPEG, decode_user_comment, read_jpeg
 from comfylens.warn import Code
-
-API = {"3": {"class_type": "KSampler", "inputs": {"seed": 1}}}
-API_TEXT = json.dumps(API)
-
-
-def segment(marker: int, payload: bytes) -> bytes:
-    return bytes([0xFF, marker]) + (len(payload) + 2).to_bytes(2) + payload
 
 
 def jpeg(exif: Image.Exif | None = None, *segments: bytes, size=(16, 8)) -> bytes:

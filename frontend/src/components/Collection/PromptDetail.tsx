@@ -1,29 +1,25 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { api, originalUrl } from "../../api/client";
-import type { CollectionImage, SavedPrompt } from "../../api/types";
-import {
-  loraText,
-  promptSettingsRows,
-  refreshAfterCollectionWrite,
-  showInLibrary,
-} from "../../lib/collection";
-import { fmtDateTime, fmtInt, loadingText } from "../../lib/format";
+import type { SavedPrompt } from "../../api/types";
+import { refreshAfterCollectionWrite, showInLibrary, useSavedPrompt } from "../../lib/collection";
+import { errorText, fmtDateTime, fmtInt, loadingText } from "../../lib/format";
+import { loraText, promptSettingsRows } from "../../lib/settings";
 import { useCollection } from "../../state/collection";
 import { useFileActions } from "../../state/fileActions";
 import { useUi } from "../../state/ui";
 import { Glyph } from "../icons";
-import { Button, DESTRUCTIVE, Heading, LINK_BUTTON, Thumbnail, td } from "../ui";
+import { Button, DESTRUCTIVE, DialogActions, Heading, LINK_BUTTON, ThumbButton, td } from "../ui";
+import { Modal } from "../Modal";
 import {
   GraphCopyButtons,
-  Modal,
   PromptBox,
   ViewerHeader,
   ViewerModal,
   ViewerSidebar,
   ZoomableImage,
-} from "../Modals";
+} from "../Viewer";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -31,36 +27,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <Heading>{title}</Heading>
       {children}
     </div>
-  );
-}
-
-function PromptText({ label, text }: { label: string; text: string }) {
-  return text ? <PromptBox label={label} text={text} /> : null;
-}
-
-function Thumb({
-  image,
-  selected = false,
-  onClick,
-  title,
-}: {
-  image: CollectionImage;
-  selected?: boolean;
-  onClick?: () => void;
-  title: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      title={title}
-      className={`h-16 w-16 shrink-0 overflow-hidden rounded bg-subtle disabled:cursor-default ${
-        selected ? "outline-2 outline-accent" : ""
-      }`}
-    >
-      <Thumbnail hash={image.content_hash} />
-    </button>
   );
 }
 
@@ -80,9 +46,10 @@ function ImagePane({ prompt }: { prompt: SavedPrompt }) {
       {prompt.references.length > 1 && (
         <div className="flex shrink-0 gap-1 overflow-x-auto p-2">
           {prompt.references.map((r, i) => (
-            <Thumb
+            <ThumbButton
               key={r.content_hash}
-              image={r}
+              hash={r.content_hash}
+              size="h-16 w-16"
               selected={r === shown}
               onClick={() => setIndex(i)}
               title={`Reference ${i + 1}`}
@@ -104,7 +71,7 @@ function Attempts({ prompt }: { prompt: SavedPrompt }) {
       const updated = await api.unlinkAttempts(prompt.id, [hash]);
       client.setQueryData(["collection", "prompt", prompt.id], updated);
     } catch (e) {
-      notify({ text: `Could not unlink the image: ${(e as Error).message}`, tone: "error" });
+      notify({ text: `Could not unlink the image: ${errorText(e)}`, tone: "error" });
     }
     refreshAfterCollectionWrite(client);
   };
@@ -115,8 +82,9 @@ function Attempts({ prompt }: { prompt: SavedPrompt }) {
           const id = a.library_ids[0];
           return (
             <div key={a.content_hash} className="group relative">
-              <Thumb
-                image={a}
+              <ThumbButton
+                hash={a.content_hash}
+                size="h-16 w-16"
                 onClick={id === undefined ? undefined : () => openDetail(id)}
                 title={id === undefined ? "Not in this library" : `Open image ${id}`}
               />
@@ -159,7 +127,7 @@ function DeleteDialog({ prompt, onClose }: { prompt: SavedPrompt; onClose: () =>
       openPrompt(null);
       notify({ text: `Deleted “${prompt.title}”`, tone: "info" });
     } catch (e) {
-      notify({ text: `Could not delete: ${(e as Error).message}`, tone: "error" });
+      notify({ text: `Could not delete: ${errorText(e)}`, tone: "error" });
     }
     refreshAfterCollectionWrite(client);
   };
@@ -169,12 +137,12 @@ function DeleteDialog({ prompt, onClose }: { prompt: SavedPrompt; onClose: () =>
         The saved prompt and its copied reference images are removed from the collection. Library
         files are never touched.
       </p>
-      <div className="flex justify-end gap-2">
+      <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <button type="button" autoFocus onClick={() => void remove()} className={DESTRUCTIVE}>
           Delete
         </button>
-      </div>
+      </DialogActions>
     </Modal>
   );
 }
@@ -231,8 +199,8 @@ function Details({ prompt }: { prompt: SavedPrompt }) {
           )}
         </div>
       )}
-      <PromptText label="Positive prompt" text={prompt.positive} />
-      <PromptText label="Negative prompt" text={prompt.negative} />
+      <PromptBox label="Positive prompt" text={prompt.positive} hideEmpty />
+      <PromptBox label="Negative prompt" text={prompt.negative} hideEmpty />
       {settings.length > 0 && (
         <table className="w-full text-xs">
           <tbody>
@@ -273,11 +241,7 @@ function Details({ prompt }: { prompt: SavedPrompt }) {
 export default function PromptDetail() {
   const id = useCollection((s) => s.openId);
   const openPrompt = useCollection((s) => s.openPrompt);
-  const query = useQuery({
-    queryKey: ["collection", "prompt", id],
-    queryFn: () => api.savedPrompt(id!),
-    enabled: id !== null,
-  });
+  const query = useSavedPrompt(id);
 
   useEffect(() => {
     if (id === null) return;

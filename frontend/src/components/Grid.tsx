@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 
 import { api } from "../api/client";
 import type { ImageItem, ImagesPage, SortKey } from "../api/types";
+import { isTyping } from "../lib/dom";
 import { fmtInt } from "../lib/format";
 import { useElementWidth } from "../lib/hooks";
 import { comparePair } from "../lib/compare";
@@ -13,7 +14,7 @@ import { SORT_KEYS, useFilters } from "../state/filters";
 import { hiddenCount, marqueeSelect, useSelection } from "../state/selection";
 import { TILE_MAX, TILE_MIN, useUi } from "../state/ui";
 import Tile from "./Tile";
-import { Button, FIELD } from "./ui";
+import { Button, ErrorState, FIELD } from "./ui";
 
 const PAD = 8;
 const GAP = 6;
@@ -35,11 +36,6 @@ interface Marquee {
   additive: boolean;
   onTile: boolean;
   moved: boolean;
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
 }
 
 function Toolbar({ total }: { total: number }) {
@@ -312,7 +308,7 @@ export default function Grid() {
         onMouseDown={onMouseDown}
         className="relative min-h-0 flex-1 overflow-y-auto select-none"
       >
-        {query.isError && <div className="p-4 text-danger">{query.error.message}</div>}
+        {query.isError && <ErrorState error={query.error} />}
         {query.isSuccess && order.length === 0 && (
           <div className="p-8 text-center text-muted">No images match the filters.</div>
         )}

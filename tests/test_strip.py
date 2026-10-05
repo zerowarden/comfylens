@@ -4,7 +4,9 @@ import struct
 from io import BytesIO
 
 import pytest
+from conftest import API_PROMPT as API
 from conftest import chunk, golden_png
+from conftest import jpeg_segment as segment
 from PIL import Image, ImageCms
 
 from comfylens.metadata import read_metadata
@@ -12,7 +14,6 @@ from comfylens.metadata.jpeg import EXIF_PREFIX, XMP_PREFIX
 from comfylens.metadata.png import SIGNATURE
 from comfylens.metadata.strip import CannotStrip, strip_jpeg, strip_metadata, strip_png
 
-API = {"3": {"class_type": "KSampler", "inputs": {"seed": 1}}}
 ICC = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
 
 
@@ -48,10 +49,6 @@ def jpeg_segments(data: bytes) -> list[tuple[int, bytes]]:
         out.append((marker, data[pos + 4 : pos + 2 + length]))
         pos += 2 + length
     return out
-
-
-def segment(marker: int, payload: bytes) -> bytes:
-    return bytes([0xFF, marker]) + (len(payload) + 2).to_bytes(2) + payload
 
 
 def with_segments(data: bytes, *segments: bytes) -> bytes:

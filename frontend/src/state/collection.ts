@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import type { CollectionImage, Draft, SavedPrompt } from "../api/types";
-import { parseViewHash } from "../lib/viewHash";
+import { initialViewState } from "../lib/viewHash";
 
 /** A new prompt starts from a draft; an edit starts from the saved prompt. */
 export type Editor =
@@ -19,7 +19,7 @@ interface CollectionStore {
   openLinking: (ids: number[] | null) => void;
 }
 
-const initial = typeof window === "undefined" ? null : parseViewHash(window.location.hash);
+const initial = initialViewState();
 
 export const useCollection = create<CollectionStore>((set) => ({
   openId: initial?.promptId ?? null,

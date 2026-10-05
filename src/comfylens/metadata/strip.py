@@ -10,7 +10,7 @@ comments, timestamps, physical size, embedded thumbnails and any bytes after the
 
 import struct
 
-from comfylens.metadata.jpeg import SOI
+from comfylens.metadata.jpeg import SOI, STANDALONE_MARKERS
 from comfylens.metadata.png import SIGNATURE
 
 
@@ -42,7 +42,6 @@ _PNG_CHUNK = struct.Struct(">I4s")
 
 _EOI, _SOS, _APP0, _APP2, _APP14, _COM = 0xD9, 0xDA, 0xE0, 0xE2, 0xEE, 0xFE
 _APPS = range(0xE0, 0xF0)
-_STANDALONE = frozenset(range(0xD0, 0xD8)) | {0x01}  # RSTn and TEM carry no length
 _JFIF = b"JFIF\0"
 _JFIF_HEADER = 12  # identifier, version, density units, x and y density; then thumbnail size
 _ICC = b"ICC_PROFILE\0"
@@ -96,7 +95,7 @@ def strip_jpeg(data: bytes) -> bytes:
         if marker == _EOI:
             out.append(bytes((0xFF, _EOI)))
             return b"".join(out)
-        if marker in _STANDALONE:
+        if marker in STANDALONE_MARKERS:
             out.append(bytes((0xFF, marker)))
             continue
         if pos + 2 > end:

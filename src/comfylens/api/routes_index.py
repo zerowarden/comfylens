@@ -5,8 +5,9 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from comfylens.api.errors import ApiError
 from comfylens.api.schemas import IndexStatusModel
-from comfylens.api.server import ApiError, Server, server_of
+from comfylens.api.server import Server, server_of
 
 router = APIRouter(prefix="/api/index")
 

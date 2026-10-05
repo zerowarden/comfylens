@@ -120,15 +120,56 @@ export function Collapsible({
   );
 }
 
-export function ShareBar({ share }: { share: number }) {
+export function ShareBar({
+  share,
+  tone = "accent",
+  className = "w-full",
+}: {
+  share: number;
+  tone?: "accent" | "warning";
+  className?: string;
+}) {
   return (
-    <div className="h-1.5 w-full rounded bg-track">
+    <div className={`h-1.5 ${className} rounded bg-track`}>
       <div
-        className="h-1.5 rounded bg-accent"
+        className={`h-1.5 rounded ${tone === "warning" ? "bg-warning" : "bg-accent"}`}
         style={{ width: `${Math.min(100, share * 100)}%` }}
       />
     </div>
   );
+}
+
+/** The cancel/confirm row at the foot of a dialog. */
+export function DialogActions({ children }: { children: ReactNode }) {
+  return <div className="flex justify-end gap-2">{children}</div>;
+}
+
+/** "Show all N" / "Show fewer" for a list cut at a threshold. */
+export function ShowAllToggle({
+  count,
+  all,
+  onToggle,
+  className = "mt-0.5",
+}: {
+  count: number;
+  all: boolean;
+  onToggle: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`${className} text-xs text-link hover:underline`}
+    >
+      {all ? "Show fewer" : `Show all ${count}`}
+    </button>
+  );
+}
+
+/** A failed query's message. */
+export function ErrorState({ error, className = "p-4" }: { error: Error; className?: string }) {
+  return <div className={`${className} text-danger`}>{error.message}</div>;
 }
 
 const COPY_STATE = {
@@ -235,10 +276,12 @@ export function Thumbnail({
   hash,
   fallback = null,
   draggable,
+  fit = "contain",
 }: {
   hash: string | null | undefined;
   fallback?: ReactNode;
   draggable?: boolean;
+  fit?: "contain" | "cover";
 }) {
   const [failed, onError] = useThumbnailFailure();
   if (!hash || failed) return fallback;
@@ -250,8 +293,39 @@ export function Thumbnail({
       draggable={draggable}
       onError={onError}
       alt=""
-      className="h-full w-full object-contain"
+      className={`h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"}`}
     />
+  );
+}
+
+/** A thumbnail in a clickable box; `size` is a Tailwind box class such as "h-16 w-16". */
+export function ThumbButton({
+  hash,
+  size,
+  selected = false,
+  onClick,
+  title,
+  disabled,
+}: {
+  hash: string | null | undefined;
+  size: string;
+  selected?: boolean;
+  onClick?: () => void;
+  title?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled ?? !onClick}
+      title={title}
+      className={`${size} shrink-0 overflow-hidden rounded bg-subtle disabled:cursor-default ${
+        selected ? "outline-2 outline-accent" : ""
+      }`}
+    >
+      <Thumbnail hash={hash} />
+    </button>
   );
 }
 

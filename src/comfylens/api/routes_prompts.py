@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from comfylens.analytics.distinctive import distinctive_terms
 from comfylens.analytics.prompts import analyze_prompts
 from comfylens.analytics.scope import resolve
+from comfylens.api.errors import ApiError, error_response
 from comfylens.api.schemas import (
     DistinctiveRequest,
     DistinctiveResponse,
@@ -16,7 +17,7 @@ from comfylens.api.schemas import (
     PromptsResponse,
     Scope,
 )
-from comfylens.api.server import ApiError, error_response, server_of
+from comfylens.api.server import server_of
 
 router = APIRouter(prefix="/api")
 

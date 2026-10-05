@@ -5,17 +5,43 @@ transaction each; SQLite serializes them with the indexer's.
 """
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
+from typing import Any
 
 from comfylens import version
+
+# SQLite's parameter limit is much higher, but short statements keep locks brief.
+IN_BATCH = 500
 
 
 class CatalogMissing(FileNotFoundError):
     """No usable catalog exists for this library."""
+
+
+def chunks[T](values: Sequence[T], size: int = IN_BATCH) -> Iterator[Sequence[T]]:
+    for start in range(0, len(values), size):
+        yield values[start : start + size]
+
+
+def placeholders(count: int) -> str:
+    return ",".join("?" * count)
+
+
+def like_pattern(text: str) -> str:
+    """A `%text%` pattern that matches `text` literally; pair it with `ESCAPE '\\'`."""
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def rows(conn: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    """A SELECT's rows as dicts keyed by column name."""
+    cursor = conn.execute(sql, params)
+    names = [d[0] for d in cursor.description or ()]
+    return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
 
 
 def connect(path: Path, *, timeout: float = 5.0) -> sqlite3.Connection:

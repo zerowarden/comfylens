@@ -18,8 +18,10 @@ from comfylens.api import (
     routes_prompts,
     routes_stats,
 )
-from comfylens.api.server import ALLOWED_HOSTS, ApiError, Server, error_response
+from comfylens.api.errors import ApiError, error_response
+from comfylens.api.server import ALLOWED_HOSTS, Server
 from comfylens.config import Config
+from comfylens.extract.pipeline import describe
 from comfylens.index.watch import DEBOUNCE_MS
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -72,7 +74,7 @@ def create_app(
 
     @app.exception_handler(Exception)
     async def _internal(_request: Request, e: Exception) -> JSONResponse:
-        return error_response(500, "internal", f"{type(e).__name__}: {e}")
+        return error_response(500, "internal", describe(e))
 
     for module in (
         routes_library,

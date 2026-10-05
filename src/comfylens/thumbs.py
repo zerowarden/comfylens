@@ -1,11 +1,11 @@
 """WebP thumbnails in the cache directory, keyed by content hash."""
 
-import os
-import tempfile
 from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageOps
+
+from comfylens.fileio import write_atomic
 
 
 def make_thumbnail(data: bytes, target: Path, long_edge: int, quality: int) -> bool:
@@ -21,15 +21,7 @@ def make_thumbnail(data: bytes, target: Path, long_edge: int, quality: int) -> b
 
     # Write beside the target, then rename into place: readers never see a partial file,
     # and two workers thumbnailing identical files cannot corrupt each other.
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            img.save(f, "WEBP", quality=quality, method=4)
-        os.replace(tmp, target)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    write_atomic(target, lambda f: img.save(f, "WEBP", quality=quality, method=4))
     return True
 
 

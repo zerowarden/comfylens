@@ -9,9 +9,10 @@ from fastapi import APIRouter, Request
 from comfylens import version
 from comfylens.analytics.facets import facets
 from comfylens.analytics.snapshot import NO_METADATA
+from comfylens.api.errors import ApiError
 from comfylens.api.routes_index import index_status
 from comfylens.api.schemas import Facets, LibraryInfo
-from comfylens.api.server import ApiError, server_of
+from comfylens.api.server import server_of
 from comfylens.db.connection import get_meta
 
 router = APIRouter(prefix="/api")

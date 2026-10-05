@@ -8,7 +8,7 @@ from comfylens.analytics.collection import (
 )
 from comfylens.analytics.prompts import PromptFrames, empty_prompt_frames
 from comfylens.analytics.snapshot import Snapshot, apply_removal, empty_snapshot
-from comfylens.collection.store import Links
+from comfylens.collection.models import Links
 
 FOX, OWL = 11, 22  # prompt keys
 

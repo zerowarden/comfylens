@@ -4,6 +4,14 @@ const integer = new Intl.NumberFormat("en-US");
 
 export const fmtInt = (n: number) => integer.format(n);
 
+/** What a missing value shows as, everywhere. */
+export const MISSING = "—";
+
+/** `v` as text, or `missing` for null, undefined and the empty string. */
+export function text(v: string | number | null | undefined, missing = MISSING): string {
+  return v === null || v === undefined || v === "" ? missing : String(v);
+}
+
 /** Up to 4 decimals, trailing zeros trimmed: 2 -> "2", 1.4623 -> "1.4623". */
 export function fmtNum(x: number | null | undefined): string {
   if (x === null || x === undefined || !Number.isFinite(x)) return "—";
@@ -28,7 +36,7 @@ export function fmtBytes(n: number): string {
   return `${(n / 1024 ** 2).toFixed(1)} MB`;
 }
 
-const plural = (n: number, word: string) => `${fmtInt(n)} ${word}${n === 1 ? "" : "s"}`;
+export const plural = (n: number, word: string) => `${fmtInt(n)} ${word}${n === 1 ? "" : "s"}`;
 
 /**
  * The analysis header in two parts: `main` ("Analyzing 37 selected images") and `notes` on files
@@ -59,4 +67,9 @@ export function scopeSentence(scope: ScopeInfo): string {
 /** What a pending query shows: its error, or that it is still loading. */
 export function loadingText(error: Error | null): string {
   return error ? error.message : "Loading…";
+}
+
+/** A caught value's message for a notice, whatever it turned out to be. */
+export function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }

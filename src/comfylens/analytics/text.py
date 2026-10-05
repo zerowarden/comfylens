@@ -4,7 +4,6 @@ import re
 import unicodedata
 from importlib import resources
 from pathlib import Path
-from typing import Literal
 
 _LORA_TAG = re.compile(r"<(?:lora|lyco):[^>]*>")
 # "(text:1.2)" with unescaped parentheses and no nested ones; applied until nothing changes.
@@ -61,7 +60,6 @@ def tokens(segment: str) -> list[str]:
     return out
 
 
-UnitKind = Literal["phrase", "1g", "2g", "3g"]
 _NUMBER = re.compile(r"[\d.,'-]+")
 
 

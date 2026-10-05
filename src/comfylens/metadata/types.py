@@ -14,6 +14,15 @@ Kind = Literal["api_prompt", "workflow", "a1111", "json", "text", "oversized"]
 MAX_TEXT_BYTES = 50 * 1024 * 1024
 
 
+def is_api_node(value: Any) -> bool:
+    """Whether a JSON object has the shape of a ComfyUI API prompt node."""
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("class_type"), str)
+        and isinstance(value.get("inputs"), dict)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class TextHit:
     key: str  # "prompt", "workflow", "UserComment", "xmp", ...

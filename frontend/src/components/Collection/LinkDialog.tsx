@@ -1,24 +1,19 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { api, thumbUrl } from "../../api/client";
-import { linkImages } from "../../lib/collection";
+import { linkImages, useCollectionList } from "../../lib/collection";
 import { fmtInt } from "../../lib/format";
 import { useDebounced } from "../../lib/hooks";
 import { useCollection } from "../../state/collection";
-import { Modal } from "../Modals";
-import { FOCUS_FIELD } from "../ui";
+import { Modal } from "../Modal";
+import { ErrorState, FOCUS_FIELD, Thumbnail } from "../ui";
 
 function LinkForm({ ids }: { ids: number[] }) {
   const client = useQueryClient();
   const openLinking = useCollection((s) => s.openLinking);
   const [text, setText] = useState("");
   const q = useDebounced(text, 200);
-  const list = useQuery({
-    queryKey: ["collection", "list", q, null, null],
-    queryFn: () => api.collection({ q }),
-    placeholderData: keepPreviousData,
-  });
+  const list = useCollectionList({ q });
   const close = () => openLinking(null);
   const title =
     ids.length === 1
@@ -36,7 +31,7 @@ function LinkForm({ ids }: { ids: number[] }) {
       <p className="mb-2 text-xs text-muted">
         The images are linked as attempts of the prompt; nothing is copied.
       </p>
-      {list.isError && <p className="text-xs text-danger">{list.error.message}</p>}
+      {list.isError && <ErrorState error={list.error} className="text-xs" />}
       {list.data?.items.length === 0 && (
         <p className="py-4 text-center text-xs text-muted">
           {q ? "No saved prompts match." : "The collection is empty. Save a prompt first."}
@@ -54,9 +49,7 @@ function LinkForm({ ids }: { ids: number[] }) {
               className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-sm hover:bg-hover focus:bg-hover focus:outline-none"
             >
               <span className="h-8 w-8 shrink-0 overflow-hidden rounded bg-subtle">
-                {p.cover_hash && (
-                  <img src={thumbUrl(p.cover_hash)} alt="" className="h-full w-full object-cover" />
-                )}
+                <Thumbnail hash={p.cover_hash} fit="cover" />
               </span>
               <span className="min-w-0 flex-1 truncate">{p.title}</span>
               {p.attempt_count > 0 && (

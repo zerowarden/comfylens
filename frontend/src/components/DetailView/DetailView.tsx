@@ -4,6 +4,7 @@ import { Fragment, useEffect, type ReactNode } from "react";
 import { api, fileUrl } from "../../api/client";
 import type { ImageDetail } from "../../api/types";
 import { settingsRows } from "../../lib/compare";
+import { baseName } from "../../lib/files";
 import { fmtBytes, fmtNum, loadingText } from "../../lib/format";
 import { useImageDetail, useImageOrder } from "../../lib/images";
 import { useFileActions } from "../../state/fileActions";
@@ -19,7 +20,7 @@ import {
   ViewerModal,
   ViewerSidebar,
   ZoomableImage,
-} from "../Modals";
+} from "../Viewer";
 import LoraChain from "./LoraChain";
 import NodeTable from "./NodeTable";
 
@@ -54,10 +55,6 @@ function Settings({ d }: { d: ImageDetail }) {
   );
 }
 
-function Prompt({ label, text }: { label: string; text: string | null }) {
-  return text === null ? null : <PromptBox label={label} text={text} />;
-}
-
 /** Later stages' prompts, where they differ from the primary stage's shown above. */
 function StagePrompts({ d }: { d: ImageDetail }) {
   const primary = d.generation;
@@ -65,10 +62,10 @@ function StagePrompts({ d }: { d: ImageDetail }) {
   return d.stages.slice(1).map((s) => (
     <Fragment key={s.index}>
       {s.positive_prompt !== primary.positive_prompt && (
-        <Prompt label={`Stage ${s.index} positive prompt`} text={s.positive_prompt} />
+        <PromptBox label={`Stage ${s.index} positive prompt`} text={s.positive_prompt} />
       )}
       {s.negative_prompt !== primary.negative_prompt && (
-        <Prompt label={`Stage ${s.index} negative prompt`} text={s.negative_prompt} />
+        <PromptBox label={`Stage ${s.index} negative prompt`} text={s.negative_prompt} />
       )}
     </Fragment>
   ));
@@ -84,7 +81,7 @@ function Details({ id }: { id: number }) {
     <div className="space-y-3 p-3">
       <div className="flex flex-wrap gap-2">
         <GraphCopyButtons load={raw} />
-        <a href={fileUrl(id)} download={d.file.rel_path.split("/").pop()} className={LINK_BUTTON}>
+        <a href={fileUrl(id)} download={baseName(d.file.rel_path)} className={LINK_BUTTON}>
           Download original
         </a>
       </div>
@@ -105,8 +102,8 @@ function Details({ id }: { id: number }) {
       )}
       {d.generation && (
         <>
-          <Prompt label="Positive prompt" text={d.generation.positive_prompt} />
-          <Prompt label="Negative prompt" text={d.generation.negative_prompt} />
+          <PromptBox label="Positive prompt" text={d.generation.positive_prompt} />
+          <PromptBox label="Negative prompt" text={d.generation.negative_prompt} />
         </>
       )}
       <StagePrompts d={d} />
@@ -152,13 +149,27 @@ function ImagePane({ id }: { id: number }) {
   );
 }
 
+/** Matches the fade-out in index.css: the closed view unmounts once that animation has run. */
+const FADE_OUT_MS = 150;
+
 export default function DetailView() {
   const id = useUi((s) => s.detailId);
+  const last = useUi((s) => s.lastDetailId);
   const openDetail = useUi((s) => s.openDetail);
+  const dropDetail = useUi((s) => s.dropDetail);
   const { order } = useImageOrder();
+  // The image on screen: the open one, or the last one while its view fades out.
+  const shown = id ?? last;
+
+  // Hold the closed view on screen for its fade-out, then unmount it.
+  useEffect(() => {
+    if (id !== null || last === null) return;
+    const timer = window.setTimeout(dropDetail, FADE_OUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [id, last, dropDetail]);
 
   // -1 when opened from an example outside the current order: no stepping then.
-  const index = id === null ? -1 : order.indexOf(id);
+  const index = shown === null ? -1 : order.indexOf(shown);
   const previous = index >= 0 ? order[index - 1] : undefined;
   const next = index >= 0 ? order[index + 1] : undefined;
 
@@ -176,14 +187,18 @@ export default function DetailView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [id, previous, next, openDetail]);
 
-  if (id === null) return null;
+  if (shown === null) return null;
   return (
-    <ViewerModal layer="z-50" onClose={() => openDetail(null)}>
-      <ImagePane key={id} id={id} />
+    <ViewerModal
+      layer="z-50"
+      onClose={() => openDetail(null)}
+      className={id === null ? "animate-fade-out" : "animate-fade-in"}
+    >
+      <ImagePane key={shown} id={shown} />
       <ViewerSidebar
         header={
           <ViewerHeader onClose={() => openDetail(null)}>
-            <span className="font-medium">Image {id}</span>
+            <span className="font-medium">Image {shown}</span>
             {index >= 0 && (
               <span className="flex items-center gap-1 text-xs text-muted">
                 {index + 1} of {order.length}
@@ -215,7 +230,7 @@ export default function DetailView() {
           </ViewerHeader>
         }
       >
-        <Details key={id} id={id} />
+        <Details key={shown} id={shown} />
       </ViewerSidebar>
     </ViewerModal>
   );

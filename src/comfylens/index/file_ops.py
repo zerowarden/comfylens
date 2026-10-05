@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from send2trash import send2trash
 
 from comfylens.config import Config
-from comfylens.db.connection import transaction
+from comfylens.db.connection import chunks, placeholders, transaction
 from comfylens.index.timestamps import generated_at
 from comfylens.index.write import delete_files
 
@@ -140,11 +140,10 @@ def trash_files(root: Path, conn: sqlite3.Connection, ids: list[int]) -> Trashed
     """
     result = Trashed()
     rows: dict[int, str] = {}
-    for start in range(0, len(ids), 500):
-        chunk = ids[start : start + 500]
+    for chunk in chunks(ids):
         rows.update(
             conn.execute(
-                f"SELECT id, rel_path FROM files WHERE id IN ({','.join('?' * len(chunk))})",
+                f"SELECT id, rel_path FROM files WHERE id IN ({placeholders(len(chunk))})",
                 chunk,
             ).fetchall()
         )

@@ -14,7 +14,7 @@ from comfylens.api import server as server_module
 from comfylens.api.app import create_app
 from comfylens.api.schemas import TRASH_BATCH
 from comfylens.config import Config, build_config
-from comfylens.file_ops import InvalidName, new_rel_path
+from comfylens.index.file_ops import InvalidName, new_rel_path
 from comfylens.index.indexer import Indexer
 from comfylens.paths import catalog_path
 
@@ -247,7 +247,7 @@ def test_trash_reports_each_file(client: TestClient, library: Path, monkeypatch)
     paths = ids_by_path(client)
     (library / "b.png").unlink()  # already gone: only its row goes
 
-    from comfylens import file_ops
+    from comfylens.index import file_ops
 
     real = file_ops.send2trash
 

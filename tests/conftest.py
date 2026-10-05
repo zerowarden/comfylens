@@ -14,9 +14,12 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
-from comfylens import file_ops
 from comfylens.api.server import Server
+from comfylens.collection.store import CollectionStore
 from comfylens.config import Config, build_config
+from comfylens.db.connection import connect_readonly
+from comfylens.index import file_ops
+from comfylens.paths import catalog_path
 
 GOLDEN = Path(__file__).parent / "fixtures" / "golden"
 
@@ -24,6 +27,11 @@ GOLDEN = Path(__file__).parent / "fixtures" / "golden"
 @pytest.fixture
 def config() -> Config:
     return build_config({})
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> CollectionStore:
+    return CollectionStore(tmp_path / "collection")
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +112,52 @@ def txt2img_png(seed: int, size: tuple[int, int] = (16, 16)) -> bytes:
     g = basic_txt2img()
     g.prompt["7"]["inputs"]["seed"] = seed
     return png_with_text({"prompt": g.prompt}, size)
+
+
+def flux(
+    seed: int, prompt: str = "", lora: float | None = None, *, patch: bool = False
+) -> bytes:
+    """A txt2img graph with the given seed and prompt; an optional LoRA and TeaCache patch."""
+    from graph_builder import basic_txt2img
+
+    g = basic_txt2img()
+    g.prompt["7"]["inputs"]["seed"] = seed
+    if prompt:
+        g.prompt["4"]["inputs"]["text"] = prompt
+    if lora is not None:
+        g.node(
+            "20", "LoraLoaderModelOnly", lora_name="fox.safetensors", strength_model=lora,
+            model=("1", 0),
+        )  # fmt: skip
+        g.prompt["7"]["inputs"]["model"] = ["20", 0]
+    if patch:
+        g.node("21", "TeaCache", rel_l1_thresh=0.4, model=g.prompt["7"]["inputs"]["model"])
+        g.prompt["7"]["inputs"]["model"] = ["21", 0]
+    return png_with_text({"prompt": g.prompt}, (16, 24))
+
+
+# A minimal ComfyUI API prompt, as the metadata tests embed it.
+API_PROMPT = {"3": {"class_type": "KSampler", "inputs": {"seed": 1}}}
+API_TEXT = json.dumps(API_PROMPT)
+
+
+def jpeg_segment(marker: int, payload: bytes) -> bytes:
+    return bytes([0xFF, marker]) + (len(payload) + 2).to_bytes(2) + payload
+
+
+def library_snapshot(root: Path, *, relative: bool = False) -> dict[str, tuple[int, int]]:
+    """(mtime_ns, size) per path, to prove an operation wrote nothing inside the library."""
+    paths = [root, *sorted(root.rglob("*"))]
+    key = (lambda p: str(p.relative_to(root))) if relative else str
+    return {key(p): (p.stat().st_mtime_ns, p.stat().st_size) for p in paths}
+
+
+def catalog_rows(root: Path, sql: str, *params: Any) -> list[tuple[Any, ...]]:
+    conn = connect_readonly(catalog_path(root))
+    try:
+        return conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
 
 
 def write_file(root: Path, rel: str, data: bytes, mtime_s: float | None = None) -> Path:

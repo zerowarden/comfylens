@@ -1,5 +1,4 @@
 import io
-from pathlib import Path
 
 import pytest
 from conftest import golden_png, png_with_text, txt2img_png
@@ -16,11 +15,6 @@ from comfylens.collection.drafts import (
 from comfylens.collection.store import CollectionStore
 from comfylens.config import Config
 from comfylens.paths import thumb_path, thumbs_dir
-
-
-@pytest.fixture
-def store(tmp_path: Path) -> CollectionStore:
-    return CollectionStore(tmp_path / "collection")
 
 
 def test_comfyui_image(store: CollectionStore, config: Config):

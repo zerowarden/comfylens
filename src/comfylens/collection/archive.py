@@ -15,14 +15,20 @@ import time
 import zipfile
 from dataclasses import dataclass
 from datetime import date
-from typing import IO, Annotated, Any, Literal
+from typing import IO, Any, Literal
 
 import xxhash
 from pydantic import BaseModel, Field, ValidationError
 
 from comfylens.collection.drafts import MAX_UPLOAD_BYTES, UnsupportedImage, identify
-from comfylens.collection.models import PromptSettings
-from comfylens.collection.store import EXTENSIONS, HASH_RE, CollectionStore, InvalidInput
+from comfylens.collection.models import (
+    EXTENSIONS,
+    MAX_TITLE,
+    Hash,
+    OriginalFormat,
+    PromptSettings,
+)
+from comfylens.collection.store import CollectionStore, InvalidInput
 
 MANIFEST = "comfylens-collection.json"
 FORMAT = "comfylens-collection"
@@ -33,9 +39,6 @@ MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 def export_filename(day: date) -> str:
     """The name an export is saved under, by the CLI and the browser alike."""
     return f"comfylens-collection-{day.isoformat()}.zip"
-
-
-Hash = Annotated[str, Field(pattern=f"^{HASH_RE}$")]
 
 
 class InvalidArchive(ValueError):
@@ -49,8 +52,8 @@ class ArchiveImage(BaseModel):
 
 
 class ArchivePrompt(BaseModel):
-    uid: str = Field(pattern=f"^{HASH_RE}$")
-    title: str = Field(min_length=1, max_length=200)
+    uid: Hash
+    title: str = Field(min_length=1, max_length=MAX_TITLE)
     positive: str
     negative: str
     notes: str
@@ -65,7 +68,7 @@ class ArchivePrompt(BaseModel):
 
 class ArchiveOriginal(BaseModel):
     content_hash: Hash
-    format: Literal["png", "jpeg", "webp"]
+    format: OriginalFormat
     width: int = Field(ge=0)
     height: int = Field(ge=0)
     size: int = Field(ge=0, le=MAX_UPLOAD_BYTES)

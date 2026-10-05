@@ -1,15 +1,17 @@
 import { useState } from "react";
 
+import type { LoraKey } from "../../api/types";
 import { fmtInt, fmtNum, fmtPct, loadingText } from "../../lib/format";
 import { useFilters } from "../../state/filters";
-import { ChainText } from "../icons";
-import { FilterLink, Heading, Message, Segmented, ShareBar, td, th } from "../ui";
+import { FilterLink, Message, Segmented, ShareBar, td, th } from "../ui";
 import { useStats } from "./data";
 import FamilySections from "./FamilySections";
-import { modeText, rangeText } from "./format";
+import { rangeText } from "./format";
+import LoraGraph from "./LoraGraph";
+import { ModeText } from "./Numeric";
 
 export default function Loras() {
-  const [key, setKey] = useState<"name" | "base_name">("name");
+  const [key, setKey] = useState<LoraKey>("name");
   const stats = useStats(key);
   const includeLora = useFilters((s) => s.includeLora);
   const data = stats.data;
@@ -71,7 +73,9 @@ export default function Loras() {
                           </div>
                           <ShareBar share={row.share} />
                         </td>
-                        <td className={td}>{modeText(row.strength_model)}</td>
+                        <td className={td}>
+                          <ModeText stats={row.strength_model} />
+                        </td>
                         <td className={`${td} tabular-nums`}>
                           {fmtNum(row.strength_model.median)}
                         </td>
@@ -84,25 +88,7 @@ export default function Loras() {
                   </tbody>
                 </table>
               )}
-              {(group.stacks ?? []).length > 0 && (
-                <>
-                  <Heading>Stacks</Heading>
-                  <table className="w-full text-xs">
-                    <tbody>
-                      {group.stacks!.map((s) => (
-                        <tr key={s.key}>
-                          <td className={`${td} break-all`}>
-                            <ChainText text={s.key} kind="lora" />
-                          </td>
-                          <td className={`${td} text-right whitespace-nowrap tabular-nums`}>
-                            {fmtInt(s.count)} <span className="text-muted">{fmtPct(s.share)}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              )}
+              {group.graph && <LoraGraph graph={group.graph} loraKey={key} />}
             </>
           )}
         </FamilySections>

@@ -16,7 +16,14 @@ from typing import Literal
 
 from comfylens import version
 from comfylens.config import Config, resolve_workers
-from comfylens.db.connection import has_fts, open_catalog, set_meta, transaction
+from comfylens.db.connection import (
+    chunks,
+    has_fts,
+    open_catalog,
+    placeholders,
+    set_meta,
+    transaction,
+)
 from comfylens.index.lock import IndexLock
 from comfylens.index.scanner import scan
 from comfylens.index.timestamps import Cluster, burst_clusters, generated_at
@@ -282,11 +289,10 @@ class Indexer:
             return
         reader = sqlite3.connect(catalog_path(self.root), autocommit=True)
         try:
-            for start in range(0, len(ids), 500):
-                chunk = ids[start : start + 500]
+            for chunk in chunks(ids):
                 yield from reader.execute(
                     "SELECT file_id, prompt_json FROM raw_metadata"
-                    f" WHERE file_id IN ({','.join('?' * len(chunk))})",
+                    f" WHERE file_id IN ({placeholders(len(chunk))})",
                     chunk,
                 ).fetchall()
         finally:

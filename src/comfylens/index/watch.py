@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import watchfiles
 
 from comfylens.config import IndexConfig
+from comfylens.index.scanner import PathRules
 
 # Wait until the library has been quiet this long: ComfyUI may write several files of a batch.
 DEBOUNCE_MS = 2000
@@ -27,9 +28,7 @@ class LibraryWatcher:
         self.root = root.resolve()
         self.on_change = on_change
         self.debounce_ms = debounce_ms
-        self._extensions = tuple(e.lower() for e in config.extensions)
-        self._globs = config.exclude_globs
-        self._prune = [g[:-3] for g in config.exclude_globs if g.endswith("/**")]
+        self._rules = PathRules.from_config(config.extensions, config.exclude_globs)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -55,11 +54,11 @@ class LibraryWatcher:
         except ValueError:
             return False
         parents = [rel.parents[i] for i in range(len(rel.parents) - 1)]
-        if any(p.full_match(g) for p in parents for g in self._prune):
+        if any(self._rules.is_pruned(p) for p in parents):
             return False
-        if any(rel.full_match(g) for g in (*self._globs, *self._prune)):
+        if self._rules.is_ignored(rel):
             return False
-        if path.lower().endswith(self._extensions):
+        if self._rules.is_image(path):
             return True
         return Path(path).is_dir() or not Path(path).suffix
 

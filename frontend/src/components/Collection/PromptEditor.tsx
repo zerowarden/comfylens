@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useEffect,
   useEffectEvent,
@@ -8,28 +8,32 @@ import {
   type SubmitEvent,
 } from "react";
 
-import { api, thumbUrl } from "../../api/client";
-import type { CollectionImage, Draft, PromptInput } from "../../api/types";
+import { api } from "../../api/client";
+import type { CollectionImage, PromptInput } from "../../api/types";
+import { refreshAfterCollectionWrite, uploadDrafts, useCollectionList } from "../../lib/collection";
 import {
   appendReferences,
   fillEmptyFields,
   imageFiles,
   inputOf,
   inputOfDraft,
-  loraText,
   parseTags,
-  promptSettingsRows,
-  refreshAfterCollectionWrite,
   type DraftFields,
-} from "../../lib/collection";
+} from "../../lib/draft";
+import { IMAGE_ACCEPT, hasFiles } from "../../lib/dom";
+import { errorText } from "../../lib/format";
+import { loraText, promptSettingsRows } from "../../lib/settings";
 import { useCollection, type Editor } from "../../state/collection";
 import { useFileActions } from "../../state/fileActions";
 import { useUi } from "../../state/ui";
-import { Modal } from "../Modals";
+import { Modal } from "../Modal";
 import { Glyph } from "../icons";
-import { Button, FOCUS_FIELD, PRIMARY } from "../ui";
+import { Button, DialogActions, FOCUS_FIELD, PRIMARY, Thumbnail } from "../ui";
 
 const FIELD = `mt-1 block w-full px-2 py-1 text-sm ${FOCUS_FIELD}`;
+
+const PASTED_NO_METADATA =
+  "Pasted images carry no generation metadata. If the original file has some, drop or pick the file instead.";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -39,8 +43,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     </label>
   );
 }
-
-const ACCEPT = "image/png,image/jpeg,image/webp";
 
 /** The reference images, plus a target for pasting, dropping or picking more. */
 function ImagesField({
@@ -75,11 +77,9 @@ function ImagesField({
         </button>
         {images.map((image) => (
           <div key={image.content_hash} className="group relative">
-            <img
-              src={thumbUrl(image.content_hash)}
-              alt=""
-              className="h-20 w-20 rounded bg-subtle object-contain"
-            />
+            <div className="h-20 w-20 overflow-hidden rounded bg-subtle">
+              <Thumbnail hash={image.content_hash} />
+            </div>
             <button
               type="button"
               title="Remove this reference image"
@@ -139,17 +139,14 @@ function EditorForm({ editor }: { editor: Editor }) {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(
     editor.mode === "new" && editor.draft.metadata === "none" && editor.references.length > 0
-      ? "No generation metadata was found in this image. Images pasted from the clipboard lose it; drop or pick the file itself to keep it."
+      ? PASTED_NO_METADATA
       : null,
   );
   const [adding, setAdding] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const facets = useQuery({
-    queryKey: ["collection", "list", "", null, null],
-    queryFn: () => api.collection({}),
-  });
+  const facets = useCollectionList();
 
   const close = () => openEditor(null);
   const settings = promptSettingsRows(fields.settings);
@@ -160,26 +157,13 @@ function EditorForm({ editor }: { editor: Editor }) {
     if (files.length === 0) return;
     setAdding((n) => n + files.length);
     setError(null);
-    const drafts: Draft[] = [];
-    const failures: string[] = [];
-    for (const file of files) {
-      try {
-        const draft = await api.draftFromFile(file);
-        drafts.push(draft);
-        setReferences((current) => appendReferences(current, [draft]));
-      } catch (err) {
-        failures.push(`${file.name || "pasted image"}: ${(err as Error).message}`);
-      } finally {
-        setAdding((n) => n - 1);
-      }
-    }
+    const { drafts, failures } = await uploadDrafts(files, {
+      onDraft: (draft) => setReferences((current) => appendReferences(current, [draft])),
+      onFile: () => setAdding((n) => n - 1),
+    });
     setFields((f) => fillEmptyFields(f, drafts));
     if (failures.length > 0) setError(failures.join("; "));
-    if (pasted && drafts.some((d) => d.metadata === "none")) {
-      setNote(
-        "Pasted images carry no generation metadata. If the original file has some, drop or pick the file instead.",
-      );
-    }
+    if (pasted && drafts.some((d) => d.metadata === "none")) setNote(PASTED_NO_METADATA);
   };
   const onWindowFiles = useEffectEvent((files: File[], pasted: boolean) => {
     void addFiles(files, pasted);
@@ -188,7 +172,6 @@ function EditorForm({ editor }: { editor: Editor }) {
   // While the editor is open, pasted and dropped images become references wherever they land.
   // A text paste carries no files and goes to the focused field as usual.
   useEffect(() => {
-    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
     const onPaste = (e: ClipboardEvent) => {
       const files = imageFiles(e.clipboardData?.files ?? []);
       if (files.length === 0) return;
@@ -255,8 +238,8 @@ function EditorForm({ editor }: { editor: Editor }) {
       refreshAfterCollectionWrite(client);
       if (useUi.getState().view === "collection") openPrompt(saved.id);
       else notify({ text: `Saved “${saved.title}” to the collection`, tone: "info" });
-    } catch (err) {
-      setError((err as Error).message);
+    } catch (e) {
+      setError(errorText(e));
       setSaving(false);
     }
   };
@@ -280,7 +263,7 @@ function EditorForm({ editor }: { editor: Editor }) {
         <input
           ref={fileInput}
           type="file"
-          accept={ACCEPT}
+          accept={IMAGE_ACCEPT}
           multiple
           hidden
           onChange={(e) => {
@@ -355,12 +338,12 @@ function EditorForm({ editor }: { editor: Editor }) {
           </p>
         )}
         {error && <p className="text-xs text-danger">{error}</p>}
-        <div className="flex justify-end gap-2">
+        <DialogActions>
           <Button onClick={close}>Cancel</Button>
           <button type="submit" disabled={saving || adding > 0} className={PRIMARY}>
             {editor.mode === "new" ? "Save" : "Save changes"}
           </button>
-        </div>
+        </DialogActions>
       </form>
     </Modal>
   );

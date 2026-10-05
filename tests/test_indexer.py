@@ -1,14 +1,13 @@
 import os
 import shutil
-import sqlite3
 from pathlib import Path
 
 import pytest
-from conftest import golden_png, png_with_text, txt2img_png, write_file
+from conftest import catalog_rows as rows
+from conftest import golden_png, library_snapshot, png_with_text, txt2img_png, write_file
 
 from comfylens import version
 from comfylens.config import Config, build_config
-from comfylens.db.connection import connect_readonly
 from comfylens.index import indexer as indexer_module
 from comfylens.index import worker as worker_module
 from comfylens.index.indexer import Indexer, IndexResult, IndexStatus, UnsafeLocation
@@ -30,18 +29,6 @@ def library(tmp_path: Path) -> Path:
 def run(root: Path, config: Config, **kwargs) -> IndexResult:
     workers = kwargs.pop("workers", 1)
     return Indexer(root, config, workers=workers).run(**kwargs)
-
-
-def db(root: Path) -> sqlite3.Connection:
-    return connect_readonly(catalog_path(root))
-
-
-def rows(root: Path, sql: str, *params) -> list[tuple]:
-    conn = db(root)
-    try:
-        return conn.execute(sql, params).fetchall()
-    finally:
-        conn.close()
 
 
 def test_first_index(library: Path, config: Config):
@@ -425,17 +412,11 @@ def test_reextraction_through_the_pool_matches_inline(
 
 
 def test_library_is_never_written(library: Path, config: Config):
-    def snapshot() -> dict[str, tuple[int, int]]:
-        # Directory mtimes change when anything is created, renamed or deleted inside them.
-        return {
-            str(p.relative_to(library)): (p.stat().st_mtime_ns, p.stat().st_size)
-            for p in [library, *sorted(library.rglob("*"))]
-        }
-
-    before = snapshot()
+    # Directory mtimes change when anything is created, renamed or deleted inside them.
+    before = library_snapshot(library, relative=True)
     for kwargs in ({}, {"full": True}, {"reextract_all": True}, {"workers": 2, "full": True}):
         run(library, config, **kwargs)
-    assert snapshot() == before
+    assert library_snapshot(library, relative=True) == before
 
 
 def test_state_inside_the_library_is_refused(

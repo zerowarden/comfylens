@@ -9,7 +9,7 @@ from collections.abc import Collection, Mapping
 import polars as pl
 
 from comfylens.analytics.snapshot import Snapshot
-from comfylens.collection.store import Links
+from comfylens.collection.models import Links
 
 
 def has_hash(hashes: Collection[str]) -> pl.Expr:

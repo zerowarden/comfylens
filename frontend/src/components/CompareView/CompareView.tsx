@@ -4,15 +4,16 @@ import { fileUrl } from "../../api/client";
 import type { DetailLora, ImageDetail } from "../../api/types";
 import { compareFields, compareLoras, strengthLabel } from "../../lib/compare";
 import { side, wordDiff, type Segment } from "../../lib/diff";
+import { baseName } from "../../lib/files";
 import { useImageDetail } from "../../lib/images";
 import { useUi } from "../../state/ui";
 import { chainKind } from "../../lib/chains";
 import { ChainText } from "../icons";
 import { Button, FamilyDot, Message, td, th } from "../ui";
-import { ViewerHeader, ViewerModal } from "../Modals";
+import { ViewerHeader, ViewerModal } from "../Viewer";
 import { loadingText } from "../../lib/format";
 
-const name = (d: ImageDetail) => d.file.rel_path.split("/").pop() ?? d.file.rel_path;
+const name = (d: ImageDetail) => baseName(d.file.rel_path);
 
 function Caption({ id, d }: { id: number; d: ImageDetail | undefined }) {
   const family = d?.generation?.model_family ?? null;

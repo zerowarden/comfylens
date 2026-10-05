@@ -1,5 +1,4 @@
 import io
-from pathlib import Path
 
 import pytest
 from conftest import png_with_text
@@ -86,11 +85,6 @@ def _user_comment_image(fmt: str, text: str) -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", (12, 12), (9, 9, 9)).save(buf, fmt, exif=exif.tobytes())
     return buf.getvalue()
-
-
-@pytest.fixture
-def store(tmp_path: Path) -> CollectionStore:
-    return CollectionStore(tmp_path / "collection")
 
 
 @pytest.mark.parametrize(

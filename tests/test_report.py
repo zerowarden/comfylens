@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import golden_png, png_with_text
+from conftest import flux, golden_png, png_with_text
 from graph_builder import basic_txt2img
 from typer.testing import CliRunner
 
@@ -11,22 +11,9 @@ from comfylens.config import Config
 from comfylens.db.connection import connect_readonly
 from comfylens.index.indexer import Indexer
 from comfylens.paths import catalog_path
-from comfylens.report import build_report
+from comfylens.report_data import build_report
 
 runner = CliRunner()
-
-
-def flux_png(seed: int, *, lora: float | None = None, patch: bool = False) -> bytes:
-    g = basic_txt2img()
-    g.prompt["7"]["inputs"]["seed"] = seed
-    if lora is not None:
-        g.node("20", "LoraLoaderModelOnly", lora_name="fox.safetensors", strength_model=lora,
-               model=("1", 0))  # fmt: skip
-        g.prompt["7"]["inputs"]["model"] = ["20", 0]
-    if patch:
-        g.node("21", "TeaCache", rel_l1_thresh=0.4, model=g.prompt["7"]["inputs"]["model"])
-        g.prompt["7"]["inputs"]["model"] = ["21", 0]
-    return png_with_text({"prompt": g.prompt}, (16, 24))
 
 
 @pytest.fixture
@@ -35,9 +22,9 @@ def library(tmp_path: Path, config: Config) -> Path:
     root.mkdir()
     (root / "golden.png").write_bytes(golden_png())
     (root / "golden copy.png").write_bytes(golden_png())  # identical content
-    (root / "a.png").write_bytes(flux_png(1))
-    (root / "b.png").write_bytes(flux_png(2, lora=0.8))
-    (root / "c.png").write_bytes(flux_png(3, lora=1.0, patch=True))
+    (root / "a.png").write_bytes(flux(1))
+    (root / "b.png").write_bytes(flux(2, lora=0.8))
+    (root / "c.png").write_bytes(flux(3, lora=1.0, patch=True))
     (root / "plain.png").write_bytes(png_with_text({}))
     (root / "broken.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     Indexer(root, config, workers=1).run()

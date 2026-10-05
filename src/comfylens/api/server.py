@@ -4,29 +4,25 @@ import json
 import sqlite3
 import threading
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-import polars as pl
 from fastapi import Request
-from fastapi.responses import JSONResponse
 
-from comfylens import file_ops
-from comfylens.analytics.collection import hash_matches, keyed_files, library_counts
-from comfylens.analytics.prompts import prompt_key
 from comfylens.analytics.snapshot import Snapshot, SnapshotStore, apply_removal, apply_rename
+from comfylens.api.collection_lookup import CollectionLookupMixin
+from comfylens.api.errors import ApiError, no_catalog
+from comfylens.api.search import SearchMixin
 from comfylens.collection.store import CollectionStore, CollectionUnavailable
 from comfylens.config import Config
-from comfylens.db.connection import CatalogMissing, connect, connect_readonly
+from comfylens.db.connection import connect
+from comfylens.index import file_ops
 from comfylens.index.indexer import Indexer
 from comfylens.index.watch import DEBOUNCE_MS, LibraryWatcher
 from comfylens.paths import catalog_path, collection_dir
 
-_SEARCH_CACHE = 64
 # An edit waits this long for the indexer's current transaction (an FTS rebuild of a large
 # library takes seconds) before it gives up as busy.
 _EDIT_BUSY_TIMEOUT = 30.0
@@ -34,31 +30,6 @@ _EDIT_BUSY_TIMEOUT = 30.0
 # Only these Host headers are served: without the check, a malicious page could reach the
 # loopback server through DNS rebinding. "testserver" is Starlette's TestClient default.
 ALLOWED_HOSTS = ("localhost", "127.0.0.1", "testserver")
-
-
-class ApiError(Exception):
-    def __init__(self, status: int, code: str, message: str) -> None:
-        super().__init__(message)
-        self.status, self.code, self.message = status, code, message
-
-
-def error_response(status: int, code: str, message: str, **extra: object) -> JSONResponse:
-    return JSONResponse({"error": {"code": code, "message": message}, **extra}, status_code=status)
-
-
-def not_found(what: str, raw_id: object) -> ApiError:
-    return ApiError(404, "not_found", f"no {what} with id {raw_id!r}")
-
-
-def parse_id(raw_id: str, what: str) -> int:
-    """Ids are parsed here rather than by FastAPI: anything malformed is a plain 404."""
-    if not raw_id.isdigit():
-        raise not_found(what, raw_id)
-    return int(raw_id)
-
-
-def _no_catalog() -> ApiError:
-    return ApiError(503, "no_catalog", "the library has not been indexed yet")
 
 
 def stored_json(text: str | None) -> Any:
@@ -72,7 +43,7 @@ MEDIA_TYPES = {"png": "image/png", "jpeg": "image/jpeg", "webp": "image/webp"}
 IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
-class Server:
+class Server(SearchMixin, CollectionLookupMixin):
     def __init__(self, root: Path, config: Config) -> None:
         self.root = root.resolve()
         self.config = config
@@ -195,7 +166,7 @@ class Server:
 
     def _edit_connection(self) -> sqlite3.Connection:
         if not self.catalog.is_file():
-            raise _no_catalog()
+            raise no_catalog()
         return connect(self.catalog, timeout=_EDIT_BUSY_TIMEOUT)
 
     def _index_again_if_running(self) -> None:
@@ -205,116 +176,11 @@ class Server:
             if self.indexing:
                 self._pending = True
 
-    def connect(self) -> sqlite3.Connection:
-        try:
-            return connect_readonly(self.catalog)
-        except CatalogMissing as e:
-            raise _no_catalog() from e
-
-    @contextmanager
-    def reading(self) -> Iterator[sqlite3.Connection]:
-        """A read-only catalog connection for the block, closed after it."""
-        conn = self.connect()
-        try:
-            yield conn
-        finally:
-            conn.close()
-
     def file_gone(self) -> ApiError:
         """The error for a catalogued file that is no longer on disk; queues an index run, since
         the catalog is behind the library."""
         self.request_index()
         return ApiError(404, "file_missing", "the file is no longer on disk")
-
-    def search(self, text: str) -> set[int]:
-        """Files whose positive or negative prompt contains `text` (FTS5 phrase, else LIKE)."""
-        key = (self.store.current.built_at, text)
-        if key in self._search:
-            return self._search[key]
-        conn = self.connect()
-        try:
-            ids = None
-            if self.store.current.fts:
-                phrase = '"' + text.replace('"', '""') + '"'
-                try:
-                    rows = conn.execute(
-                        "SELECT rowid FROM prompts_fts WHERE prompts_fts MATCH ?", (phrase,)
-                    ).fetchall()
-                    ids = {r[0] for r in rows}
-                except sqlite3.OperationalError:
-                    ids = None  # e.g. only punctuation: fall back to LIKE
-            if ids is None:
-                escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                pattern = f"%{escaped}%"
-                rows = conn.execute(
-                    "SELECT file_id FROM generations WHERE positive_prompt LIKE ? ESCAPE '\\'"
-                    " OR negative_prompt LIKE ? ESCAPE '\\' OR stage_prompts LIKE ? ESCAPE '\\'",
-                    (pattern, pattern, pattern),
-                ).fetchall()
-                ids = {r[0] for r in rows}
-        finally:
-            conn.close()
-        if len(self._search) >= _SEARCH_CACHE:
-            self._search.clear()
-        self._search[key] = ids
-        return ids
-
-    # The saved-prompt collection, as the filters see it. A store that is unavailable or busy
-    # matches nothing rather than failing the library's requests.
-
-    def saved_hashes(self) -> frozenset[str]:
-        if self.collection is None:
-            return frozenset()
-        try:
-            return self.collection.saved_hashes()
-        except sqlite3.Error:
-            return frozenset()
-
-    def saved_prompt_ids(self, prompt_id: int) -> set[int]:
-        """Files linked to the saved prompt, or whose positive prompt is the same text."""
-        if self.collection is None:
-            return set()
-        try:
-            links = self.collection.links(prompt_id)
-        except sqlite3.Error:
-            return set()
-        if links is None:
-            return set()
-        snap = self.store.current
-        key = (snap.built_at, links.revision, prompt_id)
-        if key in self._saved:
-            return self._saved[key]
-        ids = set(hash_matches(snap, links.hashes)["id"].to_list())
-        if links.key is not None:
-            ids |= self._same_prompt(snap, links.key)
-        if len(self._saved) >= _SEARCH_CACHE:
-            self._saved.clear()
-        self._saved[key] = ids
-        return ids
-
-    def _same_prompt(self, snap: Snapshot, key: int) -> set[int]:
-        keyed = keyed_files(snap)
-        if keyed is not None:
-            return set(keyed.filter(pl.col("positive") == key)["file_id"].to_list())
-        # Prompt frames are still being built: hash the catalog's prompts instead.
-        try:
-            conn = self.connect()
-        except ApiError:
-            return set()
-        try:
-            rows = conn.execute(
-                "SELECT file_id, positive_prompt FROM generations WHERE positive_prompt != ''"
-            ).fetchall()
-        finally:
-            conn.close()
-        present = set(snap.images["id"].to_list())
-        return {fid for fid, text in rows if fid in present and prompt_key(text) == key}
-
-    def library_counts(self) -> dict[int, int] | None:
-        """Per saved prompt, how many served files belong to it; None while prompts warm up."""
-        if self.collection is None:
-            return None
-        return library_counts(self.store.current, self.collection.all_links())
 
 
 def server_of(request: Request) -> Server:

@@ -14,10 +14,10 @@ import xxhash
 from comfylens.config import Config
 from comfylens.extract.pipeline import Outcome, describe, extract_outcome
 from comfylens.extract.types import Extraction
-from comfylens.index.thumbs import make_thumbnail
 from comfylens.metadata import read_metadata
 from comfylens.metadata.types import Format, Status
 from comfylens.paths import thumb_path
+from comfylens.thumbs import make_thumbnail
 from comfylens.warn import Code, Warn
 
 

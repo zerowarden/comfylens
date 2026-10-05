@@ -10,6 +10,8 @@ Only collection drafts read it; the indexer keeps ignoring it (see metadata.blob
 import re
 from typing import Any
 
+from comfylens.collection.models import saved_lora
+
 _SETTINGS_LINE = re.compile(r"^Steps: \d+")
 _NEGATIVE = "Negative prompt:"
 # "Key: value" pairs; a quoted value may hold commas ("Lora hashes": "a: 1, b: 2").
@@ -66,7 +68,7 @@ def loras(positive: str) -> list[dict[str, Any]]:
                 model = positional[1]
         if model is None and clip is None:
             model = clip = 1.0
-        out.append({"name": name.strip(), "strength_model": model, "strength_clip": clip})
+        out.append(saved_lora(name.strip(), model, clip))
     return out
 
 

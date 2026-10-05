@@ -4,10 +4,14 @@ export type Status = "ok" | "partial" | "no_metadata" | "error";
 export type SortKey = "generated_at" | "rel_path" | "family" | "steps" | "cfg";
 export type NumericFilterField = "steps" | "cfg" | "denoise" | "guidance" | "shift";
 export type Bucket = "day" | "week" | "month";
-export type Section = "numeric" | "categorical" | "seeds" | "loras" | "stacks" | "configs";
+export type Section = "numeric" | "categorical" | "seeds" | "loras" | "graph" | "configs";
 export type GenericKind = "num" | "str" | "bool" | "json";
 export type ImageRole = "reference" | "attempt";
 export type DraftMetadata = "comfyui" | "a1111" | "none";
+/** LoraKey in src/comfylens/analytics/loras.py: group LoRAs by file name or base name. */
+export type LoraKey = "name" | "base_name";
+/** By in src/comfylens/analytics/prompts.py: count each image, or each distinct prompt. */
+export type PromptBy = "image" | "unique_prompt";
 
 export interface LoraFilter {
   names: string[];
@@ -28,6 +32,7 @@ export interface Filters {
   has_warnings: boolean | null;
   saved: boolean | null; // linked to any saved prompt (or to none)
   saved_prompt: number | null; // one saved prompt's files: linked, or the same prompt
+  sentences: string[]; // similar-sentence cluster: the member sentence hashes (16 hex digits)
 }
 
 export interface Scope {
@@ -353,12 +358,25 @@ export interface LoraRow {
   steps: IntCount[] | null;
 }
 
-export interface StackRow {
-  key: string;
-  count: number;
-  share: number;
-  examples: number[];
-  example_hashes: string[];
+export interface LoraNode {
+  name: string;
+  images: number;
+  /** Median strength_model over the LoRA's uses. */
+  median: number | null;
+}
+
+export interface LoraLink {
+  source: string;
+  target: string;
+  /** Images that use both LoRAs. */
+  images: number;
+}
+
+export interface LoraGraph {
+  /** The top_n most-used LoRAs. */
+  nodes: LoraNode[];
+  /** Strongest co-occurrences, capped. */
+  links: LoraLink[];
 }
 
 export interface ConfigRow {
@@ -377,13 +395,13 @@ export interface FamilyStats {
   categorical: Record<string, Categorical> | null;
   seeds: SeedStats | null;
   loras: LoraRow[] | null;
-  stacks: StackRow[] | null;
+  graph: LoraGraph | null;
   configs: ConfigRow[] | null;
 }
 
 export interface StatsRequest extends Scope {
   sections: Section[];
-  lora_key: "name" | "base_name";
+  lora_key: LoraKey;
 }
 
 export interface StatsResponse {
@@ -410,7 +428,7 @@ export type PromptSide = "positive" | "negative";
 export interface PromptsRequest extends Scope {
   side: PromptSide;
   include_template: boolean;
-  by: "image" | "unique_prompt";
+  by: PromptBy;
 }
 
 export interface TermRow {
@@ -436,6 +454,26 @@ export interface DistinctPrompt {
   example_hashes: string[];
 }
 
+export interface ClusterSentence {
+  /** Sentence hash (16 hex digits), for the similar-sentence filter. */
+  key: string;
+  text: string;
+  df: number;
+  share: number;
+}
+
+export interface PromptCluster {
+  /** Representative sentence hash (16 hex digits). */
+  key: string;
+  /** Representative sentence. */
+  text: string;
+  images: number;
+  prompts: number;
+  members: ClusterSentence[];
+  examples: number[];
+  example_hashes: string[];
+}
+
 export interface PromptGroup {
   family: string;
   images: number;
@@ -447,6 +485,7 @@ export interface PromptGroup {
   bigrams: TermRow[];
   trigrams: TermRow[];
   distinct: DistinctPrompt[];
+  clusters: PromptCluster[];
 }
 
 export interface PromptsResponse {
@@ -458,7 +497,7 @@ export interface PromptsResponse {
 /** The selection (required) is compared with the rest of the filtered set. */
 export interface DistinctiveRequest extends Scope {
   side: PromptSide;
-  by: "image" | "unique_prompt";
+  by: PromptBy;
 }
 
 export interface DistinctiveTerm {

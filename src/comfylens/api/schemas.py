@@ -1,7 +1,7 @@
 """Request and response models for every endpoint. The frontend mirrors these types."""
 
 from datetime import date
-from typing import Annotated, Any, Literal, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, Field
 
@@ -9,14 +9,14 @@ from comfylens.analytics.loras import LoraKey
 from comfylens.analytics.prompts import By, Side
 from comfylens.analytics.scope import Filters, Scope
 from comfylens.analytics.timeline import Bucket
+from comfylens.collection.models import MAX_TITLE, Hash, Role
 from comfylens.collection.models import PromptSettings as PromptSettings  # mirrored too
 from comfylens.collection.models import SavedLora as SavedLora
-from comfylens.collection.store import HASH_RE
 from comfylens.extract.types import GenericKind
 from comfylens.metadata.types import Status
 
 SortKey = Literal["generated_at", "rel_path", "family", "steps", "cfg"]
-Section = Literal["numeric", "categorical", "seeds", "loras", "stacks", "configs"]
+Section = Literal["numeric", "categorical", "seeds", "loras", "graph", "configs"]
 ALL_SECTIONS: list[Section] = list(get_args(Section))
 
 
@@ -341,12 +341,21 @@ class LoraRow(BaseModel):
     steps: list[IntCount] | None  # base_name grouping only
 
 
-class StackRow(BaseModel):
-    key: str
-    count: int
-    share: float
-    examples: list[int]  # up to 6 file ids, most recent first
-    example_hashes: list[str]  # their content hashes, for /thumbs
+class LoraNode(BaseModel):
+    name: str
+    images: int
+    median: float | None  # median strength_model over the LoRA's uses
+
+
+class LoraLink(BaseModel):
+    source: str
+    target: str
+    images: int  # images that use both LoRAs
+
+
+class LoraGraph(BaseModel):
+    nodes: list[LoraNode]  # top_n most-used LoRAs
+    links: list[LoraLink]  # strongest co-occurrences, capped
 
 
 class ConfigRow(BaseModel):
@@ -365,7 +374,7 @@ class FamilyStats(BaseModel):
     categorical: dict[str, Categorical] | None = None
     seeds: SeedStats | None = None
     loras: list[LoraRow] | None = None
-    stacks: list[StackRow] | None = None
+    graph: LoraGraph | None = None
     configs: list[ConfigRow] | None = None
 
 
@@ -422,6 +431,23 @@ class DistinctPrompt(BaseModel):
     example_hashes: list[str]
 
 
+class ClusterSentence(BaseModel):
+    key: str  # sentence hash (16 hex digits), for the similar-sentence filter
+    text: str
+    df: int
+    share: float
+
+
+class PromptCluster(BaseModel):
+    key: str  # representative sentence hash (16 hex digits)
+    text: str  # representative sentence
+    images: int
+    prompts: int  # distinct prompts whose text holds a member sentence
+    members: list[ClusterSentence]  # every member, most frequent first
+    examples: list[int]  # up to 6 file ids, most recent first
+    example_hashes: list[str]  # their content hashes, for /thumbs
+
+
 class PromptGroup(BaseModel):
     family: str
     images: int  # in scope, with a non-empty prompt on this side
@@ -433,6 +459,7 @@ class PromptGroup(BaseModel):
     bigrams: list[TermRow]
     trigrams: list[TermRow]
     distinct: list[DistinctPrompt]  # top 50 by count
+    clusters: list[PromptCluster]  # near-duplicate sentences, most images first
 
 
 class PromptsResponse(BaseModel):
@@ -512,16 +539,15 @@ class NodeStatsResponse(BaseModel):
     groups: list[NodeStatsGroup]
 
 
-ImageRole = Literal["reference", "attempt"]
+ImageRole = Role
 DraftMetadata = Literal["comfyui", "a1111", "none"]
-HASH_PATTERN = f"^{HASH_RE}$"
 
 
 # PromptSettings and SavedLora live in collection.models: the archive reads them too.
 
 
 class PromptInput(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=MAX_TITLE)
     positive: str = Field(max_length=100_000)
     negative: str = Field("", max_length=100_000)
     notes: str = Field("", max_length=100_000)
@@ -529,8 +555,8 @@ class PromptInput(BaseModel):
     model_family: str | None = Field(None, max_length=200)
     tags: list[str] = Field([], max_length=50)
     settings: PromptSettings = PromptSettings()
-    references: list[Annotated[str, Field(pattern=HASH_PATTERN)]] = Field([], max_length=100)
-    attempts: list[Annotated[str, Field(pattern=HASH_PATTERN)]] = Field([], max_length=TRASH_BATCH)
+    references: list[Hash] = Field([], max_length=100)
+    attempts: list[Hash] = Field([], max_length=TRASH_BATCH)
 
 
 class CollectionImage(BaseModel):
@@ -607,9 +633,7 @@ class LinkResponse(BaseModel):
 
 
 class UnlinkRequest(BaseModel):
-    hashes: list[Annotated[str, Field(pattern=HASH_PATTERN)]] = Field(
-        min_length=1, max_length=TRASH_BATCH
-    )
+    hashes: list[Hash] = Field(min_length=1, max_length=TRASH_BATCH)
 
 
 class DeleteResponse(BaseModel):

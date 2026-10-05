@@ -12,9 +12,9 @@ import polars as pl
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, Response
 
-from comfylens import file_ops
 from comfylens.analytics.collection import has_hash
 from comfylens.analytics.scope import filter_files
+from comfylens.api.errors import ApiError, not_found, parse_id
 from comfylens.api.schemas import (
     IdsQuery,
     IdsResponse,
@@ -31,17 +31,17 @@ from comfylens.api.schemas import (
 from comfylens.api.server import (
     IMMUTABLE,
     MEDIA_TYPES,
-    ApiError,
     Server,
-    not_found,
-    parse_id,
     same_origin,
     server_of,
     stored_json,
 )
 from comfylens.collection.drafts import rebuild_thumbnail
-from comfylens.collection.store import HASH_RE
+from comfylens.collection.models import HASH_RE
+from comfylens.db.connection import rows
 from comfylens.extract.normalize import size_facts
+from comfylens.index import file_ops
+from comfylens.index.write import LORA_COLUMNS, SAMPLER_STAGE_COLUMNS
 from comfylens.metadata.strip import CannotStrip, strip_metadata
 from comfylens.paths import thumb_path, thumbs_dir
 
@@ -69,6 +69,11 @@ _ITEM_COLUMNS = [
     "saved",
 ]
 _THUMB_NAME = re.compile(HASH_RE + r"\.webp")
+# The detail payload uses the dataclass field name `index`, the table column `stage_index`.
+_STAGE_SELECT = ", ".join(
+    f"{c} AS 'index'" if c == "stage_index" else c for c in SAMPLER_STAGE_COLUMNS
+)
+_LORA_SELECT = ", ".join(LORA_COLUMNS)
 
 
 def _sorted(server: Server, query: ImagesQuery | IdsQuery) -> pl.DataFrame:
@@ -96,17 +101,11 @@ def ids(body: IdsQuery, request: Request) -> dict[str, Any]:
     return {"ids": _sorted(server_of(request), body)["id"].to_list()}
 
 
-def _rows(conn: sqlite3.Connection, sql: str, *params: Any) -> list[dict[str, Any]]:
-    cursor = conn.execute(sql, params)
-    names = [d[0] for d in cursor.description]
-    return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
-
-
 def _file_row(conn: sqlite3.Connection, raw_id: str) -> dict[str, Any]:
-    rows = _rows(conn, "SELECT * FROM files WHERE id = ?", parse_id(raw_id, "image"))
-    if not rows:
+    found = rows(conn, "SELECT * FROM files WHERE id = ?", (parse_id(raw_id, "image"),))
+    if not found:
         raise not_found("image", raw_id)
-    return rows[0]
+    return found[0]
 
 
 _BUSY = "the catalog is busy with an index run; try again"
@@ -130,28 +129,26 @@ def detail(raw_id: str, request: Request) -> dict[str, Any]:
     with server_of(request).reading() as conn:
         f = _file_row(conn, raw_id)
         file_id = f["id"]
-        gens = _rows(conn, "SELECT * FROM generations WHERE file_id = ?", file_id)
-        stages = _rows(
+        gens = rows(conn, "SELECT * FROM generations WHERE file_id = ?", (file_id,))
+        stages = rows(
             conn,
-            "SELECT stage_index AS 'index', node_id, class_type, seed, steps, cfg, sampler_name,"
-            " scheduler, denoise, start_step, end_step, model_family, base_model, text_encoder,"
-            " clip_type, lora_stack_key, positive_prompt, negative_prompt, guidance, shift,"
-            " latent_source FROM sampler_stages WHERE file_id = ? ORDER BY stage_index",
-            file_id,
+            f"SELECT {_STAGE_SELECT} FROM sampler_stages WHERE file_id = ? ORDER BY stage_index",
+            (file_id,),
         )
-        loras = _rows(
+        loras = rows(
             conn,
-            "SELECT position, stage_index, node_id, entry, class_type, name_raw, name, base_name,"
-            " step, strength_model, strength_clip, enabled, reachable FROM loras"
+            f"SELECT {_LORA_SELECT} FROM loras"
             " WHERE file_id = ? ORDER BY reachable DESC, stage_index, position IS NULL, position,"
             " node_id, entry",
-            file_id,
+            (file_id,),
         )
-        inputs = _rows(
-            conn, "SELECT node_id, filename, sha256 FROM input_images WHERE file_id = ?", file_id
+        inputs = rows(
+            conn,
+            "SELECT node_id, filename, sha256 FROM input_images WHERE file_id = ?",
+            (file_id,),
         )
-        warnings = _rows(
-            conn, "SELECT code, node_id, message FROM warnings WHERE file_id = ?", file_id
+        warnings = rows(
+            conn, "SELECT code, node_id, message FROM warnings WHERE file_id = ?", (file_id,)
         )
         reachable = dict(
             conn.execute(

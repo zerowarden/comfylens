@@ -70,6 +70,27 @@ def test_round_trip(tmp_path: Path, config: Config):
     stats = import_zip(target, io.BytesIO(archive))
     assert (stats.added, stats.skipped, stats.images) == (2, 0, 2)
     assert comparable(target) == comparable(source)
+
+    # Reviewed absolute values, independent of export_rows: a systematic marshalling bug must
+    # not round-trip cleanly.
+    by_title = {p["title"]: p for p in target.summaries()}
+    assert set(by_title) == {"Golden", "Text only"}
+    golden = target.get(by_title["Golden"]["id"])
+    assert golden is not None
+    assert (golden["positive"], golden["negative"], golden["model_family"]) == (
+        "a golden hour portrait",
+        "blurry",
+        "qwen-image-2.1",
+    )
+    assert golden["tags"] == ["portrait", "warm"]
+    assert golden["settings"]["steps"] == 20
+    assert golden["settings"]["loras"] == [
+        {"name": "fox", "strength_model": 0.8, "strength_clip": None}
+    ]
+    assert target.prompts_for_hash(ATTEMPT) == [
+        (by_title["Golden"]["id"], "Golden", "attempt")
+    ]
+
     restored = target.get(target.summaries(q="Golden")[0]["id"])
     assert restored is not None
     for image in restored["images"]:

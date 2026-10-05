@@ -15,7 +15,6 @@ long_edge = 512
 quality = 82
 
 [analysis]
-group_by_family = true
 dedupe_identical_files = true
 round_decimals = 4                     # floats, for mode and grouping
 config_round_decimals = 2              # floats, for configuration keys
@@ -31,6 +30,7 @@ template_threshold = 0.6               # share of prompts in scope
 template_min_scope = 5
 stopwords_file = ""                    # "" = bundled list
 distinctive_alpha0 = 500.0             # prior strength for distinctive terms
+cluster_similarity = 0.7               # string similarity that joins two sentences in a cluster
 
 [timestamps]
 source = "mtime"                       # "mtime" or "filename"

@@ -15,7 +15,7 @@ import {
   TRASH_BATCH,
   withBaseName,
 } from "./files";
-import { fmtInt } from "./format";
+import { errorText, fmtInt } from "./format";
 import { orderKey, PAGE_SIZE } from "./images";
 
 // Both edits change the caches first and send the request after: the grid never waits for the
@@ -31,8 +31,6 @@ export function cachedRelPath(client: QueryClient, id: number): string | null {
   }
   return null;
 }
-
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * After a success the server's snapshot version has moved, and the top bar refetches every query

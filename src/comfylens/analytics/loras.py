@@ -74,15 +74,46 @@ def top_values(rows: pl.DataFrame, column: str, top_n: int) -> pl.DataFrame:
     )
 
 
-def stacks(rows: pl.DataFrame, top_n: int) -> list[dict[str, Any]]:
-    size = rows.height
-    return [
-        {
-            "key": key,
-            "count": count,
-            "share": count / size,
-            "examples": ids,
-            "example_hashes": hashes,
-        }
-        for key, count, ids, hashes in top_values(rows, "lora_stack_key", top_n).iter_rows()
-    ]
+GRAPH_LINKS = 60  # strongest co-occurrences; more would make the force layout unreadable
+
+
+def lora_graph(
+    uses: pl.DataFrame, key: LoraKey, top_n: int, link_limit: int = GRAPH_LINKS
+) -> dict[str, Any]:
+    """LoRAs as nodes and co-usage as weighted links, for the Stacks view.
+
+    Nodes are the `top_n` most-used LoRAs; a link counts the images that use both (whatever
+    stages they are on). The node's median strength rides along for the tooltip.
+    """
+    applied = uses.select("file_id", key).drop_nulls().unique()
+    nodes = (
+        uses.select("file_id", key, "strength_model")
+        .drop_nulls(["file_id", key])
+        .group_by(key)
+        .agg(
+            pl.col("file_id").n_unique().alias("images"),
+            pl.col("strength_model").median().alias("median"),
+        )
+        .sort("images", key, descending=[True, False])
+        .head(top_n)
+    )
+    top = nodes[key]
+    applied = applied.filter(pl.col(key).is_in(top.implode()))
+    links = (
+        applied.join(applied, on="file_id")
+        .filter(pl.col(key) < pl.col(f"{key}_right"))
+        .group_by(pl.col(key).alias("source"), pl.col(f"{key}_right").alias("target"))
+        .agg(pl.col("file_id").n_unique().alias("images"))
+        .sort("images", "source", "target", descending=[True, False, False])
+        .head(link_limit)
+    )
+    return {
+        "nodes": [
+            {"name": name, "images": images, "median": median}
+            for name, images, median in nodes.select(key, "images", "median").iter_rows()
+        ],
+        "links": [
+            {"source": source, "target": target, "images": images}
+            for source, target, images in links.select("source", "target", "images").iter_rows()
+        ],
+    }
