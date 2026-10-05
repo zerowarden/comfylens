@@ -1,7 +1,9 @@
 import contextlib
+import errno
 import ipaddress
 import json
 import os
+import socket
 import sys
 import tempfile
 import threading
@@ -49,6 +51,9 @@ Library = Annotated[
     Path, typer.Argument(exists=True, file_okay=False, readable=True, help="Library directory.")
 ]
 JsonFlag = Annotated[bool, typer.Option("--json", help="Print JSON instead of tables.")]
+
+# serve tries this many ports from the configured one before taking any free port.
+_PORT_TRIES = 20
 
 
 def _config() -> Config:
@@ -156,7 +161,10 @@ def report_library(
 @app.command("serve")
 def serve_library(
     library: Library,
-    port: Annotated[int | None, typer.Option(help="Port (default from config: 8765).")] = None,
+    port: Annotated[
+        int | None,
+        typer.Option(help="Port (default from config: 8765); the next free one if taken."),
+    ] = None,
     host: Annotated[str | None, typer.Option(help="Interface (default 127.0.0.1).")] = None,
     no_index: Annotated[
         bool, typer.Option("--no-index", help="Serve the existing catalog without indexing.")
@@ -180,7 +188,11 @@ def serve_library(
             " authentication: anyone who can reach this port can view, rename and trash images.",
             err=True,
         )
-    url = f"http://{'localhost' if _is_loopback(host) else host}:{port}/"
+    sock = _listen(host, port)
+    bound = sock.getsockname()[1]
+    if bound != port:
+        typer.echo(f"Port {port} is in use; serving on {bound} instead.", err=True)
+    url = f"http://{'localhost' if _is_loopback(host) else host}:{bound}/"
 
     def announce(server: uvicorn.Server) -> None:
         while not server.started and not server.should_exit:
@@ -194,10 +206,48 @@ def serve_library(
             threading.Timer(0.5, webbrowser.open, [url]).start()
 
     application = create_app(library, config, index_on_start=not no_index, watch=watch)
-    server = uvicorn.Server(uvicorn.Config(application, host=host, port=port, log_level="warning"))
+    server = uvicorn.Server(uvicorn.Config(application, host=host, port=bound, log_level="warning"))
     threading.Thread(target=announce, args=(server,), name="startup-announce", daemon=True).start()
     with contextlib.suppress(KeyboardInterrupt):
-        server.run()
+        server.run(sockets=[sock])
+
+
+@app.command("free-port", hidden=True)
+def free_port(
+    port: Annotated[int | None, typer.Option()] = None,
+    host: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """Print the port serve would take; make dev hands it to Vite's proxy."""
+    config = _config()
+    with _listen(host or config.server.host, port or config.server.port) as sock:
+        typer.echo(sock.getsockname()[1])
+
+
+def _listen(host: str, port: int) -> socket.socket:
+    """A socket bound to `port`, or to the next free port when it is taken."""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    try:
+        for candidate in range(port, min(port + _PORT_TRIES, 65536)):
+            try:
+                return _bind(family, host, candidate)
+            except OSError as e:
+                if e.errno != errno.EADDRINUSE:
+                    raise
+        return _bind(family, host, 0)
+    except OSError as e:
+        typer.echo(f"cannot listen on {host}:{port}: {e.strerror or e}", err=True)
+        raise typer.Exit(1) from e
+
+
+def _bind(family: socket.AddressFamily, host: str, port: int) -> socket.socket:
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+    except OSError:
+        sock.close()
+        raise
+    return sock
 
 
 def _is_loopback(host: str) -> bool:

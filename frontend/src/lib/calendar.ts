@@ -15,7 +15,6 @@ export function weekday(iso: string): number {
   return (new Date(parse(iso)).getUTCDay() + 6) % 7;
 }
 
-/** Days from `a` to `b`. */
 function daysBetween(a: string, b: string): number {
   return Math.round((parse(b) - parse(a)) / DAY_MS);
 }

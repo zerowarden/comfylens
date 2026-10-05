@@ -340,12 +340,10 @@ describe.skipIf(!base)("live API contract", () => {
             "rest_share",
           ]);
         }
-        // Highest z first in the selection list.
         const zs = g.unigrams.selection.map((t) => t.z);
         expect(zs).toEqual([...zs].sort((x, y) => y - x));
       }
     }
-    // A selection is required.
     await expect(api.distinctive({ ...all, side: "positive", by: "image" })).rejects.toMatchObject({
       status: 400,
       code: "selection_required",

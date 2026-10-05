@@ -201,7 +201,6 @@ export function Modal({
       e.preventDefault();
       onClose();
     } else if (e.key === "Tab") {
-      // Keep focus inside the dialog.
       const focusable = [
         ...(ref.current?.querySelectorAll<HTMLElement>(
           "input, textarea, select, a[href], button:not(:disabled)",

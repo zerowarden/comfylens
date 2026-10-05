@@ -157,9 +157,6 @@ def _timing(raw: str | None) -> dict[str, Any] | None:
     }
 
 
-# Rendering.
-
-
 def _n(x: float | None) -> str:
     if x is None:
         return "—"

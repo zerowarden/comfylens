@@ -123,8 +123,6 @@ class CollectionStore:
         self._migrate()
         self.collect_garbage()
 
-    # Connections and migrations.
-
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = connect(self.path, timeout=_BUSY_TIMEOUT)
@@ -178,8 +176,6 @@ class CollectionStore:
     def revision(self) -> int:
         with self._connect() as conn:
             return self._revision(conn)
-
-    # Originals.
 
     def _file(self, content_hash: str, fmt: str) -> Path:
         return self.originals_dir / content_hash[:2] / f"{content_hash}.{EXTENSIONS[fmt]}"
@@ -259,8 +255,6 @@ class CollectionStore:
         for content_hash, fmt in gone:
             self._file(content_hash, fmt).unlink(missing_ok=True)
         return len(gone)
-
-    # Prompts.
 
     def _validated(self, data: PromptData) -> tuple[PromptData, list[str], list[str]]:
         title = data.title.strip()
@@ -417,8 +411,6 @@ class CollectionStore:
                 self._bump(conn)
         return True
 
-    # Reads.
-
     def get(self, prompt_id: int) -> dict[str, Any] | None:
         """Every field, tags, and images in order (references first) with original details."""
         with self._connect() as conn:
@@ -567,8 +559,6 @@ class CollectionStore:
                 " ORDER BY updated_at DESC, id DESC",
                 (key_hex(key),),
             ).fetchall()
-
-    # Export and import.
 
     def export_rows(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Every prompt (fields, tags, images) and every original a prompt refers to, read in

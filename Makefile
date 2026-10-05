@@ -8,8 +8,8 @@ SYNTHETIC ?= /tmp/comfylens-synthetic
 
 NPM := npm --prefix frontend
 WATCH_FLAG := $(if $(filter 1,$(strip $(WATCH))),--watch)
-SERVE_ARGS := $(if $(strip $(PORT)),--port $(PORT)) $(if $(strip $(HOST)),--host $(HOST))
-DEV_PORT_ENV := $(if $(strip $(PORT)),COMFYLENS_PORT=$(PORT))
+HOST_ARG := $(if $(strip $(HOST)),--host $(HOST))
+SERVE_ARGS := $(if $(strip $(PORT)),--port $(PORT)) $(HOST_ARG)
 NODE_MODULES := frontend/node_modules/.package-lock.json
 WEB := src/comfylens/web/index.html
 FRONTEND_SOURCES := $(shell find frontend/src -type f) frontend/index.html \
@@ -31,10 +31,10 @@ run: library build ## Build what is stale, then serve LIBRARY (indexes in the ba
 serve: run ## Alias for run
 
 dev: library $(NODE_MODULES) ## API server and Vite dev server with hot reload; Ctrl-C stops both
-	@echo "UI with hot reload: http://localhost:5173/   API: http://$(or $(HOST),127.0.0.1):$(or $(PORT),8765)/"
-	@trap 'kill 0' INT TERM EXIT; \
-	uv run comfylens serve "$(LIBRARY)" --no-open $(SERVE_ARGS) $(WATCH_FLAG) & \
-	$(DEV_PORT_ENV) $(NPM) run dev; \
+	@port=$$(uv run comfylens free-port $(SERVE_ARGS)) || exit; \
+	trap 'kill 0' INT TERM EXIT; \
+	uv run comfylens serve "$(LIBRARY)" --no-open --port $$port $(HOST_ARG) $(WATCH_FLAG) & \
+	COMFYLENS_PORT=$$port $(NPM) run dev; \
 	wait
 
 install: $(NODE_MODULES) ## Install Python and frontend dependencies
@@ -70,4 +70,4 @@ synthetic: ## Write N synthetic images to SYNTHETIC
 	uv run python scripts/make_synthetic_library.py $(N) "$(SYNTHETIC)"
 
 clean: ## Remove the built frontend and tool caches (never the library, catalog or thumbnails)
-	rm -rf src/comfylens/web .pytest_cache .ruff_cache
+	rm -rf src/comfylens/web .cache

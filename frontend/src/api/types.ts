@@ -9,8 +9,6 @@ export type GenericKind = "num" | "str" | "bool" | "json";
 export type ImageRole = "reference" | "attempt";
 export type DraftMetadata = "comfyui" | "a1111" | "none";
 
-// Scope.
-
 export interface LoraFilter {
   names: string[];
   mode: "any" | "all";
@@ -45,8 +43,6 @@ export interface ScopeInfo {
   duplicates_removed: number;
   analyzed: number;
 }
-
-// Library, index, facets.
 
 export interface IndexStatusModel {
   state: "idle" | "scanning" | "processing" | "finalizing";
@@ -106,8 +102,6 @@ export interface Facets {
   numeric_ranges: Record<string, Range>;
 }
 
-// Images.
-
 export interface Sort {
   key: SortKey;
   descending: boolean;
@@ -148,8 +142,6 @@ export interface IdsQuery {
 export interface IdsResponse {
   ids: number[];
 }
-
-// Renaming and trashing files.
 
 export interface RenameRequest {
   name: string; // the new base name, extension included; the directory stays
@@ -295,8 +287,6 @@ export interface RawResponse {
   other: Record<string, unknown>;
 }
 
-// Statistics.
-
 export interface HistogramBar {
   x0: number;
   x1: number;
@@ -402,8 +392,6 @@ export interface StatsResponse {
   groups: FamilyStats[];
 }
 
-// Timeline.
-
 export interface TimelineRequest extends Scope {
   bucket: Bucket;
 }
@@ -417,8 +405,6 @@ export interface TimelineResponse {
   date_min: string | null;
   date_max: string | null;
 }
-
-// Prompts.
 
 export type PromptSide = "positive" | "negative";
 
@@ -470,8 +456,6 @@ export interface PromptsResponse {
   groups: PromptGroup[];
 }
 
-// Distinctive terms.
-
 /** The selection (required) is compared with the rest of the filtered set. */
 export interface DistinctiveRequest extends Scope {
   side: PromptSide;
@@ -511,8 +495,6 @@ export interface DistinctiveResponse {
   groups: DistinctiveGroup[];
 }
 
-// Generic node inputs.
-
 export interface NodeInputKey {
   class_type: string;
   input_name: string;
@@ -545,8 +527,6 @@ export interface NodeStatsResponse {
   input_name: string;
   groups: NodeStatsGroup[];
 }
-
-// The saved-prompt collection.
 
 export interface SavedLora {
   name: string;

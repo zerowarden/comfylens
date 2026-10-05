@@ -27,9 +27,6 @@ class ScopeInfo(BaseModel):
     analyzed: int  # files the statistics cover
 
 
-# Library, index, facets.
-
-
 class IndexStatusModel(BaseModel):
     state: Literal["idle", "scanning", "processing", "finalizing"]
     total: int
@@ -87,9 +84,6 @@ class Facets(BaseModel):
     numeric_ranges: dict[str, Range]  # steps, cfg, denoise, guidance, shift
 
 
-# Images.
-
-
 class Sort(BaseModel):
     key: SortKey = "generated_at"
     descending: bool = True
@@ -130,8 +124,6 @@ class IdsQuery(BaseModel):
 class IdsResponse(BaseModel):
     ids: list[int]
 
-
-# Renaming and trashing files.
 
 TRASH_BATCH = 500  # ids per trash request; the frontend splits larger selections
 
@@ -278,9 +270,6 @@ class RawResponse(BaseModel):
     other: dict[str, Any]  # other text keys: parsed JSON where possible, else text
 
 
-# Statistics.
-
-
 class HistogramBar(BaseModel):
     x0: float  # discrete histograms: x0 == x1 == the value
     x1: float
@@ -386,9 +375,6 @@ class StatsResponse(BaseModel):
     groups: list[FamilyStats]  # largest first
 
 
-# Timeline.
-
-
 class TimelineRequest(Scope):
     bucket: Bucket = "day"
 
@@ -401,9 +387,6 @@ class TimelineResponse(BaseModel):
     selected: list[int] | None  # when the scope has a selection
     date_min: date | None  # of the filtered set without its date filter
     date_max: date | None
-
-
-# Prompts.
 
 
 class PromptsRequest(Scope):
@@ -454,9 +437,6 @@ class PromptsResponse(BaseModel):
     groups: list[PromptGroup]
 
 
-# Distinctive terms.
-
-
 class DistinctiveRequest(Scope):
     """The selection is compared with the rest of the filtered set (filters without dates are
     applied as usual). A non-empty selection is required."""
@@ -495,9 +475,6 @@ class DistinctiveResponse(BaseModel):
     groups: list[DistinctiveGroup]  # families present in the selection, largest first
 
 
-# Generic node inputs.
-
-
 class NodeInputKey(BaseModel):
     class_type: str
     input_name: str
@@ -530,8 +507,6 @@ class NodeStatsResponse(BaseModel):
     input_name: str
     groups: list[NodeStatsGroup]
 
-
-# The saved-prompt collection.
 
 ImageRole = Literal["reference", "attempt"]
 DraftMetadata = Literal["comfyui", "a1111", "none"]

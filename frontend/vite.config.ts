@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-// The comfylens server; `make dev PORT=...` passes another port through COMFYLENS_PORT.
+// `make dev` passes the port the comfylens server took through COMFYLENS_PORT.
 const backend = `http://127.0.0.1:${process.env.COMFYLENS_PORT ?? "8765"}`;
 
 export default defineConfig({

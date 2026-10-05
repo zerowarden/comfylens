@@ -1,86 +1,55 @@
 # comfylens
 
-A local web app that indexes a directory of ComfyUI output images and reports the generation settings they used. You can also rename images and move them to the trash from it.
+A local web app that indexes ComfyUI output images and shows the generation settings they used. It writes inside the library only when you rename or trash an image from the UI.
 
-## Quick start
+## Quick Start
+
+Requires `make`, [uv](https://docs.astral.sh/uv/) (it fetches Python 3.14 if needed) and Node.js 24.
 
 ```sh
-make LIBRARY=/path/to/comfyui/output       # install and build what is stale, then serve and open the browser
-make dev LIBRARY=/path/to/comfyui/output   # API plus Vite with hot reload on :5173; Ctrl-C stops both
-make check                                 # ruff, pyright, ESLint, Prettier, pytest, Vitest
-make help                                  # every target and variable (LIBRARY, PORT, HOST, WATCH, ...)
+make LIBRARY=/path/to/comfyui/output
 ```
 
-## Setup
-
-Requires [uv](https://docs.astral.sh/uv/) with Python 3.14, and Node.js 24 for the frontend. `make` runs these steps for you.
+This installs dependencies, builds the UI, indexes in the background, watches for new images and opens http://localhost:8765/. If port 8765 is taken, the next free port is used. `make help` lists the targets and variables (`LIBRARY`, `PORT`, `HOST`, `WATCH`).
 
 ```sh
-uv sync
-npm --prefix frontend ci
-npm --prefix frontend run build   # writes the UI to src/comfylens/web/
-```
-
-Checks:
-
-```sh
-uv run pytest
-uv run ruff check . && uv run pyright
-npm --prefix frontend test && npm --prefix frontend run lint
-```
-
-Frontend development: run `uv run comfylens serve DIR --no-open` and `npm --prefix frontend run dev` side by side. Vite proxies `/api` and `/thumbs` to `127.0.0.1:8765`.
-
-## Usage
-
-```sh
-uv run comfylens serve DIR              # web UI at http://localhost:8765/
-uv run comfylens index DIR              # incremental; --full re-reads, --reextract re-extracts
-uv run comfylens report DIR             # add --json, or --family qwen-image-2.1
-uv run comfylens inspect IMAGE.png      # one file, no catalog; add --json
-uv run comfylens collection export DIR  # back up the prompt collection; or a FILE.zip, --force
+uv run comfylens serve DIR              # --port, --host, --watch, --no-index, --no-open
+uv run comfylens index DIR              # --full re-reads, --reextract re-extracts
+uv run comfylens report DIR             # --json, --family NAME
+uv run comfylens inspect IMAGE.png      # one file, no catalog; --json
+uv run comfylens collection export DIR  # back up saved prompts to a zip
 uv run comfylens collection import FILE.zip
 ```
 
-- **`serve`:** starts the web UI on 127.0.0.1. It serves the existing catalog at once, indexes in the background and opens a browser. Use `--no-index`, `--no-open`, `--port` and `--host` to change that. A non-loopback `--host` prints a warning, because there is no authentication and the UI can rename and trash files. With `--watch`, new images are indexed as ComfyUI writes them; `make` turns this on by default.
-- **`index`:** scans the library and reads new or changed files once in a process pool. It writes the catalog and WebP thumbnails, and flags bulk-copied timestamps. It never writes inside the library.
-- **`report`:** shows the parse success rate, families, reachable node classes with no handler, warnings and suspect timestamp clusters. It also prints per-family statistics, LoRAs and top configurations, plus index timing.
-- **`inspect`:** shows everything extraction finds in one file.
-- **`collection export` / `collection import`:** the same as Export and Import in the Collection view. Export writes `comfylens-collection-YYYY-MM-DD.zip` into a directory, or to the file you name; it never replaces a file without `--force`, and the zip appears only once complete, so it suits a scheduled backup. Import skips prompts already in the collection.
+There is no authentication. A non-loopback `--host` lets anyone who can reach the port rename and trash your images.
 
-In the UI:
+### What gets created
 
-- **Rename and trash:** right-click an image in the grid or in the detail view. Rename changes the file name within its folder, keeping the extension, and never overwrites another file. Move to trash sends the files to the system trash (on Linux `~/.local/share/Trash`, or `.Trash-<uid>` at the root of another drive), where your file manager can restore them. Right-click a selected image to trash the whole selection; images hidden by filters are left alone. The grid updates at once, and the catalog is updated with the file, so no re-index is needed. These are the only actions that change files in the library.
-- **Compare:** select exactly two images and click Compare to see their settings, LoRA chains and a word-level prompt diff side by side.
-- **Distinctive terms:** with a selection, the Prompts tab shows the words and phrases that set the selection apart from the rest of the filtered images.
-- **Prompt collection:** switch to Collection in the top bar to keep prompts worth trying, each with reference images, tags, notes and a source link. Drop, pick or paste images there or into the prompt editor (PNG, JPEG or WebP; ComfyUI or A1111 metadata fills in the prompt and settings), or right-click a library image and choose Save to collection. Add to saved prompt links library images to a saved prompt as attempts. In the Prompts tab, the bookmark button beside a distinct positive prompt saves it as a new prompt. Saved images carry a bookmark badge, the Collection filter in the sidebar shows saved or unsaved images, and Show in library lists a saved prompt's images: those linked to it and those whose prompt has the same text. Images are copied into the collection, so a saved prompt keeps its references when library files are renamed or trashed. The collection is shared by every library. Export downloads it as one zip of prompts and images, for a backup or another machine; Import adds an exported zip's prompts, skipping those already there.
-- **Families:** images are grouped by model family using the `[[families]]` rules in the config. The defaults cover Qwen Image, Krea 2 (local `krea-2` and hosted `krea-2-api`), FLUX and Ideogram.
-
-State lives outside the library:
-
-| What | Where |
+| Path | Contents |
 | --- | --- |
-| Catalog | `$XDG_DATA_HOME/comfylens/<library-id>/catalog.sqlite` |
-| Thumbnails | `$XDG_CACHE_HOME/comfylens/thumbs/` |
-| Prompt collection | `$XDG_DATA_HOME/comfylens/collection/` |
-| Config | `$XDG_CONFIG_HOME/comfylens/config.toml` |
+| `~/.local/share/comfylens/` | One catalog per library, and the saved-prompt collection |
+| `~/.cache/comfylens/` | Thumbnails |
+| `~/.config/comfylens/config.toml` | Optional config, only if you create it; defaults in `src/comfylens/data/default_config.toml` |
+| `.venv/`, `frontend/node_modules/`, `src/comfylens/web/`, `.cache/` | Dependencies, the built UI and tool caches, inside the clone |
+| `/tmp/comfylens-synthetic/` | Only from `make synthetic` |
 
-Deleting the catalog or the thumbnail directory is always safe; the next `index` rebuilds it. The prompt collection is different: it holds your saved prompts and copies of their images, and nothing can rebuild it, so back it up with Export in the Collection view or `comfylens collection export`.
+`$XDG_DATA_HOME`, `$XDG_CACHE_HOME` and `$XDG_CONFIG_HOME` replace the `~/.local/share`, `~/.cache` and `~/.config` prefixes when set. Images you trash go to the system trash.
 
-## Configuration
+To uninstall, delete the clone and the three `comfylens` paths in your home directory. Export the collection first: catalogs and thumbnails can be rebuilt, the collection cannot. uv and npm also keep download caches (`~/.cache/uv`, `~/.local/share/uv/python`, `~/.npm`), which other projects share.
 
-Optional: `$XDG_CONFIG_HOME/comfylens/config.toml`, which defaults to `~/.config/comfylens/config.toml`. Keys are merged over `src/comfylens/data/default_config.toml`, and every valid key appears there.
-
-## Synthetic library
+## Development
 
 ```sh
-make synthetic N=100000 SYNTHETIC=/tmp/comfylens-synthetic
+make dev LIBRARY=DIR   # API and Vite with hot reload, each on a free port; Ctrl-C stops both
+make check             # ruff, pyright, ESLint, Prettier, pytest, Vitest
+make synthetic N=1000  # synthetic library in /tmp/comfylens-synthetic, for performance testing
+make clean             # remove the built UI and .cache/
 ```
 
-This writes small PNGs with varied graphs, families, LoRA stacks, batches and mtimes, for performance testing.
+- `frontend/src/api/types.ts` mirrors `src/comfylens/api/schemas.py`. Keep them in sync.
+- Images copied into `tests/fixtures/private/` (gitignored) are run through `inspect` by `tests/test_private.py`, which expects status `ok`.
+- After an intended extraction change, regenerate the golden file with `COMFYLENS_UPDATE_GOLDEN=1 uv run pytest tests/test_golden.py` and review the diff.
 
-## Testing with your own files
+## License
 
-Copy images into `tests/fixtures/private/`, which is gitignored. `tests/test_private.py` runs each one through `inspect` and expects status `ok`. Nothing is ever written to that folder.
-
-The golden test (`tests/test_golden.py`) compares against `tests/fixtures/golden/sample_qwen21.expected.json`. After an intended extraction change, regenerate that file with `COMFYLENS_UPDATE_GOLDEN=1 uv run pytest tests/test_golden.py`, then review the diff.
+MIT

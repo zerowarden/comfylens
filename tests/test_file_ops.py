@@ -53,9 +53,6 @@ def assert_index_finds_nothing_to_do(root: Path, config: Config) -> None:
     assert (result.new, result.changed, result.deleted) == (0, 0, 0)
 
 
-# Names.
-
-
 @pytest.mark.parametrize(
     ("old", "name", "new"),
     [
@@ -95,9 +92,6 @@ def test_a_name_the_indexer_would_skip_is_refused():
     config = build_config({"index": {"exclude_globs": ["**/*.skip.png"]}})
     with pytest.raises(InvalidName, match="excluded"):
         new_rel_path("a.png", "b.skip.png", config)
-
-
-# Rename.
 
 
 def test_rename(client: TestClient, library: Path, config: Config):
@@ -231,9 +225,6 @@ def test_rename_is_undone_when_the_catalog_is_busy(client: TestClient, library: 
     assert ids_by_path(client)["a.png"] == file_id
 
 
-# Trash.
-
-
 def test_trash(client: TestClient, library: Path, config: Config, trash_dir: Path):
     paths = ids_by_path(client)
     families = client.get("/api/facets").json()["families"]
@@ -293,9 +284,6 @@ def test_edits_without_a_catalog(tmp_path: Path, config: Config):
         assert c.post("/api/images/trash", json={"ids": [1]}).status_code == 503
         assert c.post("/api/images/1/rename", json={"name": "x.png"}).status_code == 503
     assert not catalog_path(root).exists()  # an edit never creates an empty catalog
-
-
-# Safety and concurrency.
 
 
 @pytest.mark.parametrize(

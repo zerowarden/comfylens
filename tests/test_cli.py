@@ -101,19 +101,19 @@ def test_serve_warns_off_loopback(tmp_path: Path, monkeypatch):
         should_exit = True  # the announce thread exits at once
 
         def __init__(self, config):
-            calls.append((config.host, config.port))
+            calls.append(config.host)
 
-        def run(self):
-            pass
+        def run(self, sockets):
+            sockets[0].close()
 
     monkeypatch.setattr(uvicorn, "Server", FakeServer)
     library = tmp_path / "lib"
     library.mkdir()
     local = runner.invoke(app, ["serve", str(library), "--no-open", "--no-index"])
     assert local.exit_code == 0 and "Warning" not in local.output
-    exposed = runner.invoke(app, ["serve", str(library), "--host", "0.0.0.0", "--port", "9000"])
+    exposed = runner.invoke(app, ["serve", str(library), "--host", "0.0.0.0", "--no-open"])
     assert exposed.exit_code == 0 and "no authentication" in exposed.output
-    assert calls == [("127.0.0.1", 8765), ("0.0.0.0", 9000)]
+    assert calls == ["127.0.0.1", "0.0.0.0"]
     assert cli._is_loopback("::1") and cli._is_loopback("localhost")
     assert not cli._is_loopback("192.168.1.5") and not cli._is_loopback("myhost")
 
@@ -125,6 +125,38 @@ def _collection_with_a_prompt() -> None:
     store = CollectionStore(collection_dir())
     ref = store.put_original(png_with_text({}), "png", 32, 32, None, None)
     store.create(PromptData(title="Fox", positive="a fox", references=[ref]))
+
+
+def test_serve_takes_the_next_free_port(tmp_path: Path, monkeypatch):
+    import socket
+
+    import uvicorn
+
+    bound = []
+
+    class FakeServer:
+        started = False
+        should_exit = True
+
+        def __init__(self, config):
+            pass
+
+        def run(self, sockets):
+            bound.append(sockets[0].getsockname()[1])
+            sockets[0].close()
+
+    monkeypatch.setattr(uvicorn, "Server", FakeServer)
+    library = tmp_path / "lib"
+    library.mkdir()
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        result = runner.invoke(app, ["serve", str(library), "--no-open", "--port", str(port)])
+        free = runner.invoke(app, ["free-port", "--port", str(port)])
+    assert result.exit_code == 0, result.output
+    assert f"Port {port} is in use" in result.output
+    assert bound[0] != port and int(free.output) != port
 
 
 def test_collection_export_and_import(tmp_path: Path):
