@@ -6,7 +6,10 @@ export interface ContextMenu {
   ids: number[]; // the images the menu acts on, in grid order
 }
 
-export type FileDialog = { kind: "rename"; id: number } | { kind: "trash"; ids: number[] };
+type FileDialog =
+  | { kind: "rename"; id: number }
+  | { kind: "tags"; ids: number[] }
+  | { kind: "trash"; ids: number[] };
 
 export interface Notice {
   text: string;
@@ -25,7 +28,7 @@ interface FileActionsStore {
   notify: (notice: Notice | null) => void;
 }
 
-/** The right-click menu, the rename and trash dialogs, and the notice that reports outcomes. */
+/** The right-click menu, the rename, tags and trash dialogs, and the notice that reports outcomes. */
 export const useFileActions = create<FileActionsStore>((set) => ({
   menu: null,
   dialog: null,

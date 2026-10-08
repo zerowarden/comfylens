@@ -34,7 +34,7 @@ export function ViewerModal({
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        className={`flex h-[90vh] w-[90vw] overflow-hidden rounded-lg bg-canvas shadow-2xl ${
+        className={`flex h-[90vh] w-[90vw] overflow-hidden rounded bg-canvas shadow-2xl ${
           column ? "flex-col" : ""
         }`}
         onClick={(e) => e.stopPropagation()}

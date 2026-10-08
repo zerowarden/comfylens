@@ -26,14 +26,14 @@ function addMonths(iso: string, months: number): string {
 }
 
 /** Months a calendar spans at least, from the first month with data. */
-export const MIN_MONTHS = 12;
+const MIN_MONTHS = 12;
 
 /** The last day of the month holding `iso`. */
 export function monthEnd(iso: string): string {
   return format(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)), 0));
 }
 
-export interface Cell {
+interface Cell {
   date: string;
   col: number; // week
   row: number; // weekday
@@ -155,19 +155,20 @@ export function inRange(date: string, from: string | null, to: string | null): b
 /** A label for the week holding each month's first day, with the year on January and on the first
  *  label. */
 export function monthLabels(calendar: Calendar): { col: number; label: string }[] {
-  const out: { col: number; label: string }[] = [];
   const cells: Cell[] = [...calendar.padding, ...calendar.days];
   cells.sort((a, b) => (a.date < b.date ? -1 : 1));
-  for (const day of cells) {
-    if (out.length > 0 && !day.date.endsWith("-01")) continue;
-    const month = Number(day.date.slice(5, 7)) - 1;
-    const name = MONTHS[month] ?? "";
-    out.push({
-      col: day.col,
-      label: out.length === 0 || month === 0 ? `${name} ${day.date.slice(0, 4)}` : name,
+  // The first cell starts a label, then every first of a month; the first and each January
+  // carry the year.
+  return cells
+    .filter((day, i) => i === 0 || day.date.endsWith("-01"))
+    .map((day, i) => {
+      const month = Number(day.date.slice(5, 7)) - 1;
+      const name = MONTHS[month] ?? "";
+      return {
+        col: day.col,
+        label: i === 0 || month === 0 ? `${name} ${day.date.slice(0, 4)}` : name,
+      };
     });
-  }
-  return out;
 }
 
 export function longDate(iso: string): string {

@@ -114,9 +114,7 @@ def txt2img_png(seed: int, size: tuple[int, int] = (16, 16)) -> bytes:
     return png_with_text({"prompt": g.prompt}, size)
 
 
-def flux(
-    seed: int, prompt: str = "", lora: float | None = None, *, patch: bool = False
-) -> bytes:
+def flux(seed: int, prompt: str = "", lora: float | None = None, *, patch: bool = False) -> bytes:
     """A txt2img graph with the given seed and prompt; an optional LoRA and TeaCache patch."""
     from graph_builder import basic_txt2img
 

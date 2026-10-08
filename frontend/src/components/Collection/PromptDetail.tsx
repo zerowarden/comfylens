@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { api, originalUrl } from "../../api/client";
-import type { SavedPrompt } from "../../api/types";
+import type { PromptSettings, SavedPrompt } from "../../api/types";
 import { refreshAfterCollectionWrite, showInLibrary, useSavedPrompt } from "../../lib/collection";
 import { errorText, fmtDateTime, fmtInt, loadingText } from "../../lib/format";
 import { loraText, promptSettingsRows } from "../../lib/settings";
@@ -147,76 +147,96 @@ function DeleteDialog({ prompt, onClose }: { prompt: SavedPrompt; onClose: () =>
   );
 }
 
-function Details({ prompt }: { prompt: SavedPrompt }) {
+function DetailActions({ prompt, onDelete }: { prompt: SavedPrompt; onDelete: () => void }) {
   const openEditor = useCollection((s) => s.openEditor);
-  const [deleting, setDeleting] = useState(false);
   const first = prompt.references[0];
   // A prompt can mix images found online with ComfyUI outputs: copy from one that has a graph.
   const withWorkflow = prompt.references.find((r) => r.has_workflow);
-  const settings = promptSettingsRows(prompt.settings);
   return (
-    <div className="space-y-3 p-3">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          onClick={() => showInLibrary(prompt.id)}
-          title="Show the library images of this prompt"
-        >
-          Show in library
-          {prompt.library_count !== null && ` (${fmtInt(prompt.library_count)})`}
-        </Button>
-        <Button onClick={() => openEditor({ mode: "edit", prompt })}>Edit</Button>
-        {withWorkflow && <RawCopy hash={withWorkflow.content_hash} />}
-        {first && (
-          <a href={`${originalUrl(first.content_hash)}?download=true`} className={LINK_BUTTON}>
-            Download original
-          </a>
-        )}
-        <Button onClick={() => setDeleting(true)} className="text-danger">
-          Delete
-        </Button>
-      </div>
-      {(prompt.tags.length > 0 || prompt.model_family || prompt.source_url) && (
-        <div className="space-y-1 text-xs">
-          {prompt.model_family && <div className="text-muted">{prompt.model_family}</div>}
-          {prompt.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {prompt.tags.map((t) => (
-                <span key={t} className="rounded bg-subtle px-1.5 py-0.5">
-                  {t}
-                </span>
-              ))}
-            </div>
-          )}
-          {prompt.source_url && (
-            <a
-              href={prompt.source_url}
-              target="_blank"
-              rel="noreferrer"
-              className="block break-all text-link hover:underline"
-            >
-              {prompt.source_url}
-            </a>
-          )}
+    <div className="flex flex-wrap gap-2">
+      <Button
+        onClick={() => showInLibrary(prompt.id)}
+        title="Show the library images of this prompt"
+      >
+        Show in library
+        {prompt.library_count !== null && ` (${fmtInt(prompt.library_count)})`}
+      </Button>
+      <Button onClick={() => openEditor({ mode: "edit", prompt })}>Edit</Button>
+      {withWorkflow && <RawCopy hash={withWorkflow.content_hash} />}
+      {first && (
+        <a href={`${originalUrl(first.content_hash)}?download=true`} className={LINK_BUTTON}>
+          Download original
+        </a>
+      )}
+      <Button onClick={onDelete} className="text-danger">
+        Delete
+      </Button>
+    </div>
+  );
+}
+
+/** The model family, tags and source link, each when set. */
+function Labels({ prompt }: { prompt: SavedPrompt }) {
+  const { model_family: family, tags, source_url: url } = prompt;
+  if (!family && tags.length === 0 && !url) return null;
+  return (
+    <div className="space-y-1 text-xs">
+      {family && <div className="text-muted">{family}</div>}
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {tags.map((t) => (
+            <span key={t} className="rounded bg-subtle px-1.5 py-0.5">
+              {t}
+            </span>
+          ))}
         </div>
       )}
+      {url && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="block break-all text-link hover:underline"
+        >
+          {url}
+        </a>
+      )}
+    </div>
+  );
+}
+
+function SettingsTable({ settings }: { settings: PromptSettings }) {
+  const rows = promptSettingsRows(settings);
+  if (rows.length === 0) return null;
+  return (
+    <table className="w-full text-xs">
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.label}>
+            <td className={`${td} w-32 text-muted`}>{row.label}</td>
+            <td className={`${td} break-all`}>{row.value}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function Details({ prompt }: { prompt: SavedPrompt }) {
+  const [deleting, setDeleting] = useState(false);
+  const { loras } = prompt.settings;
+  const changed = prompt.updated_at !== prompt.created_at;
+  return (
+    <div className="space-y-3 p-3">
+      <DetailActions prompt={prompt} onDelete={() => setDeleting(true)} />
+      <Labels prompt={prompt} />
       <PromptBox label="Positive prompt" text={prompt.positive} hideEmpty />
       <PromptBox label="Negative prompt" text={prompt.negative} hideEmpty />
-      {settings.length > 0 && (
-        <table className="w-full text-xs">
-          <tbody>
-            {settings.map((row) => (
-              <tr key={row.label}>
-                <td className={`${td} w-32 text-muted`}>{row.label}</td>
-                <td className={`${td} break-all`}>{row.value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {prompt.settings.loras.length > 0 && (
+      <SettingsTable settings={prompt.settings} />
+      {loras.length > 0 && (
         <Section title="LoRAs">
           <ul className="text-xs">
-            {prompt.settings.loras.map((l, i) => (
+            {loras.map((l, i) => (
               <li key={i}>{loraText(l)}</li>
             ))}
           </ul>
@@ -230,7 +250,7 @@ function Details({ prompt }: { prompt: SavedPrompt }) {
       <Attempts prompt={prompt} />
       <div className="text-xs text-muted">
         Saved {fmtDateTime(prompt.created_at)}
-        {prompt.updated_at !== prompt.created_at && `, changed ${fmtDateTime(prompt.updated_at)}`}
+        {changed && `, changed ${fmtDateTime(prompt.updated_at)}`}
       </div>
       {deleting && <DeleteDialog prompt={prompt} onClose={() => setDeleting(false)} />}
     </div>

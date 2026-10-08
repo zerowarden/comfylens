@@ -7,33 +7,33 @@ import sys
 import threading
 import time
 import webbrowser
-from dataclasses import asdict
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeRemainingColumn
-from rich.table import Column, Table
 
-from comfylens.collection.archive import InvalidArchive, export_filename, export_zip, import_zip
-from comfylens.collection.store import CollectionStore, CollectionUnavailable
+from comfylens.collection import (
+    CollectionStore,
+    CollectionUnavailable,
+    InvalidArchive,
+    export_filename,
+    export_zip,
+    import_zip,
+)
 from comfylens.config import Config, ConfigError, load_config
-from comfylens.db.connection import CatalogMissing, connect_readonly
-from comfylens.extract.keys import CHAIN_SEPARATOR
-from comfylens.extract.normalize import size_facts
-from comfylens.extract.pipeline import Analysis, analyze
-from comfylens.extract.registry import unregistered
-from comfylens.extract.types import Extraction
+from comfylens.db import CatalogMissing, connect_readonly
+from comfylens.extract import analyze
 from comfylens.fileio import write_atomic
-from comfylens.index.indexer import Indexer, IndexStatus, UnsafeLocation
-from comfylens.index.lock import IndexLocked
+from comfylens.index import Indexer, IndexLocked, IndexStatus, UnsafeLocation
+from comfylens.inspect_data import to_dict
+from comfylens.inspect_render import render_analysis
 from comfylens.paths import catalog_path, collection_dir
+from comfylens.rc import RcError, scan_directory
 from comfylens.report_data import build_report
 from comfylens.report_render import render_report
-from comfylens.version import EXTRACTOR_VERSION, SCHEMA_VERSION
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 collection_app = typer.Typer(
@@ -48,7 +48,13 @@ def main() -> None:
 
 
 Library = Annotated[
-    Path, typer.Argument(exists=True, file_okay=False, readable=True, help="Library directory.")
+    Path | None,
+    typer.Argument(
+        exists=True,
+        file_okay=False,
+        readable=True,
+        help="Library directory (default: scan.directory from ~/.comfylensrc).",
+    ),
 ]
 JsonFlag = Annotated[bool, typer.Option("--json", help="Print JSON instead of tables.")]
 
@@ -64,9 +70,20 @@ def _config() -> Config:
         raise typer.Exit(2) from e
 
 
+def _library(library: Path | None) -> Path:
+    """The library to use: the argument when given, else the .comfylensrc scan directory."""
+    if library is not None:
+        return library
+    try:
+        return scan_directory()
+    except RcError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(2) from e
+
+
 @app.command("index")
 def index_library(
-    library: Library,
+    library: Library = None,
     workers: Annotated[
         int | None, typer.Option(min=1, help="Worker processes (default: CPU count - 2).")
     ] = None,
@@ -79,6 +96,7 @@ def index_library(
 ) -> None:
     """Incrementally index a library. Never writes inside it."""
     config = _config()
+    root = _library(library)
     console = Console()
     with Progress(
         TextColumn("{task.description}"),
@@ -101,7 +119,7 @@ def index_library(
                 errors=status.errors,
             )
 
-        indexer = Indexer(library, config, workers=workers, on_status=show)
+        indexer = Indexer(root, config, workers=workers, on_status=show)
         try:
             result = indexer.run(full=full, reextract_all=reextract)
         except (IndexLocked, UnsafeLocation) as e:
@@ -134,7 +152,7 @@ def index_library(
 
 @app.command("report")
 def report_library(
-    library: Library,
+    library: Library = None,
     as_json: JsonFlag = False,
     family: Annotated[
         str | None, typer.Option(help="Limit the per-family section to one family.")
@@ -142,10 +160,11 @@ def report_library(
 ) -> None:
     """Summarize an existing index: parse rate, unhandled classes, warnings, statistics."""
     config = _config()
+    root = _library(library)
     try:
-        conn = connect_readonly(catalog_path(library))
+        conn = connect_readonly(catalog_path(root))
     except CatalogMissing as e:
-        typer.echo(f"No usable index for {library}. Run: comfylens index {library}", err=True)
+        typer.echo(f"No usable index for {root}. Run: comfylens index {root}", err=True)
         raise typer.Exit(1) from e
     try:
         doc = build_report(conn, config, family=family)
@@ -160,7 +179,7 @@ def report_library(
 
 @app.command("serve")
 def serve_library(
-    library: Library,
+    library: Library = None,
     port: Annotated[
         int | None,
         typer.Option(help="Port (default from config: 8765); the next free one if taken."),
@@ -177,9 +196,10 @@ def serve_library(
     """Serve the web UI; an incremental index runs in the background."""
     import uvicorn
 
-    from comfylens.api.app import create_app
+    from comfylens.api import create_app
 
     config = _config()
+    root = _library(library)
     host = host or config.server.host
     port = port or config.server.port
     if not _is_loopback(host):
@@ -199,13 +219,13 @@ def serve_library(
             time.sleep(0.05)
         if not server.started:
             return  # startup failed: the process is exiting
-        typer.echo(f"comfylens is serving {library.resolve()} at {url}")
+        typer.echo(f"comfylens is serving {root.resolve()} at {url}")
         if watch:
             typer.echo("Watching for new and changed images.")
         if config.server.open_browser and not no_open:
             threading.Timer(0.5, webbrowser.open, [url]).start()
 
-    application = create_app(library, config, index_on_start=not no_index, watch=watch)
+    application = create_app(root, config, index_on_start=not no_index, watch=watch)
     server = uvicorn.Server(uvicorn.Config(application, host=host, port=bound, log_level="warning"))
     threading.Thread(target=announce, args=(server,), name="startup-announce", daemon=True).start()
     with contextlib.suppress(KeyboardInterrupt):
@@ -272,245 +292,7 @@ def inspect_file(
         json.dump(doc, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
     else:
-        _print(Console(), file, result, config.graph.output_classes)
-
-
-def to_dict(a: Analysis, output_classes: frozenset[str]) -> dict[str, Any]:
-    """The `inspect --json` document; also the golden-test format."""
-    doc: dict[str, Any] = {
-        "versions": {"extractor": EXTRACTOR_VERSION, "schema": SCHEMA_VERSION},
-        "status": a.status,
-        "error": a.error,
-    }
-    if a.raw is not None:
-        raw = a.raw
-        doc["file"] = {
-            "format": raw.format,
-            "width": raw.width,
-            "height": raw.height,
-            **size_facts(raw.width, raw.height),
-        }
-        doc["raw_keys"] = [
-            {"key": k, "source": raw.sources[k], "kind": raw.kinds[k], "chars": len(v)}
-            for k, v in raw.texts.items()
-        ]
-    if a.graph is not None and a.reach is not None:
-        graph, reach = a.graph, a.reach
-        ordered = reach.order + [n for n in graph.nodes if n not in reach.reachable]
-        doc["outputs"] = reach.outputs
-        doc["nodes"] = [
-            {
-                "id": n,
-                "class_type": graph.nodes[n].class_type,
-                "title": graph.nodes[n].title,
-                "reachable": n in reach.reachable,
-            }
-            for n in ordered
-        ]
-        doc["unregistered"] = unregistered(
-            {graph.nodes[n].class_type for n in reach.reachable}, output_classes
-        )
-    if a.extraction is not None:
-        extraction = asdict(a.extraction)
-        del extraction["warnings"]
-        extraction["text_encoder"] = a.extraction.text_encoder
-        doc["extraction"] = extraction
-    doc["warnings"] = [asdict(w) for w in a.warnings]
-    return doc
-
-
-def _table(*headers: str, title: str) -> Table:
-    columns = [Column(h, overflow="fold") for h in headers]
-    return Table(*columns, title=title, title_justify="left")
-
-
-def _print(console: Console, path: Path, a: Analysis, output_classes: frozenset[str]) -> None:
-    status_style = {"ok": "green", "partial": "yellow"}.get(a.status, "red")
-    console.print(f"[bold]{escape(str(path))}[/]  [{status_style}]{a.status}[/]")
-    if a.error:
-        console.print(f"[red]{escape(a.error)}[/]")
-    raw = a.raw
-    if raw is None:
-        return
-    size = size_facts(raw.width, raw.height)
-    console.print(
-        f"{raw.format.upper()} {raw.width}×{raw.height}, "
-        f"{size['megapixels']} MP, aspect {size['aspect']} ({size['aspect_label']})"
-    )
-
-    keys = _table("key", "source", "kind", "chars", title="Raw keys")
-    for k, v in raw.texts.items():
-        keys.add_row(escape(k), raw.sources[k], raw.kinds[k], f"{len(v):,}")
-    console.print(keys if raw.texts else "[dim]no text metadata[/]")
-
-    if a.graph is not None and a.reach is not None:
-        graph, reach = a.graph, a.reach
-        nodes = _table("id", "class_type", "title", "", title="Nodes")
-        for n in reach.order:
-            node = graph.nodes[n]
-            tag = "output" if n in reach.outputs else ""
-            nodes.add_row(n, escape(node.class_type), escape(node.title or ""), tag)
-        for n, node in graph.nodes.items():
-            if n not in reach.reachable:
-                nodes.add_row(
-                    n,
-                    escape(node.class_type),
-                    escape(node.title or ""),
-                    "unreachable",
-                    style="dim",
-                )
-        console.print(nodes)
-        missing = unregistered({graph.nodes[n].class_type for n in reach.reachable}, output_classes)
-        if missing:
-            console.print(f"Unregistered reachable classes: {escape(', '.join(missing))}")
-
-    if a.extraction is not None:
-        _print_extraction(console, a.extraction)
-
-    if a.warnings:
-        table = _table("code", "node", "message", title="Warnings")
-        for w in a.warnings:
-            table.add_row(w.code, w.node_id or "", escape(w.message))
-        console.print(table)
-
-
-def _print_extraction(console: Console, e: Extraction) -> None:
-    stages = _table(
-        "#",
-        "node",
-        "class",
-        "seed",
-        "steps",
-        "cfg",
-        "sampler",
-        "scheduler",
-        "denoise",
-        "start",
-        "end",
-        title="Sampler stages",
-    )
-    for s in e.stages:
-        stages.add_row(
-            *(
-                "" if v is None else escape(str(v))
-                for v in (
-                    s.index,
-                    s.node_id,
-                    s.class_type,
-                    s.seed,
-                    s.steps,
-                    s.cfg,
-                    s.sampler_name,
-                    s.scheduler,
-                    s.denoise,
-                    s.start_step,
-                    s.end_step,
-                )
-            )
-        )
-    console.print(stages if e.stages else "[dim]no sampler stages[/]")
-
-    if len(e.stages) > 1:
-        models = _table(
-            "#", "family", "base model", "text encoder", "LoRAs", "guidance", "shift", "latent",
-            title="Stage models",
-        )  # fmt: skip
-        for s in e.stages:
-            models.add_row(
-                *(
-                    "" if v is None else escape(str(v))
-                    for v in (
-                        s.index,
-                        s.model_family,
-                        s.base_model,
-                        s.text_encoder,
-                        s.lora_stack_key,
-                        s.guidance,
-                        s.shift,
-                        s.latent_source,
-                    )
-                )
-            )
-        console.print(models)
-
-    if not e.stages:
-        console.print(f"[bold]Model chain:[/] {escape(e.base_model or '?')}")
-    for s in e.stages:
-        applied = sorted(
-            (u for u in e.loras if u.stage_index == s.index and u.enabled),
-            key=lambda u: u.position or 0,
-        )
-        chain = [
-            s.base_model or "?",
-            *(f"{u.name} ({u.strength_model})" for u in applied),
-            f"{s.class_type} #{s.node_id}",
-        ]
-        label = "Model chain" if len(e.stages) == 1 else f"Model chain, stage {s.index}"
-        console.print(f"[bold]{label}:[/] {escape(CHAIN_SEPARATOR.join(chain))}")
-
-    if e.loras:
-        loras = _table(
-            "stage", "pos", "node", "entry", "name", "base", "step", "model", "clip", "",
-            title="LoRAs",
-        )  # fmt: skip
-        for u in e.loras:
-            state = "" if u.reachable else "unused"
-            state = state if u.enabled else "off"
-            loras.add_row(
-                "" if u.stage_index is None else str(u.stage_index),
-                "" if u.position is None else str(u.position),
-                u.node_id,
-                u.entry,
-                escape(u.name),
-                escape(u.base_name),
-                "" if u.step is None else str(u.step),
-                str(u.strength_model),
-                "" if u.strength_clip is None else str(u.strength_clip),
-                state,
-                style=None if u.reachable and u.enabled else "dim",
-            )
-        console.print(loras)
-
-    settings = Table(show_header=False, title="Settings", title_justify="left")
-    rows: list[tuple[str, Any]] = [
-        ("model_family", e.model_family),
-        ("base_model", e.base_model),
-        ("text_encoder", e.text_encoder),
-        ("clip_type", e.clip_type),
-        ("vae", e.vae),
-        ("guidance", e.guidance),
-        ("shift", e.shift),
-        ("latent_source", e.latent_source),
-        ("batch_size", e.batch_size),
-        ("lora_stack_key", e.lora_stack_key),
-        ("config_key", e.config_key),
-        ("generation_key", e.generation_key),
-    ]
-    for name, value in rows:
-        settings.add_row(name, "" if value is None else escape(str(value)))
-    console.print(settings)
-
-    for side, text in (("Positive", e.positive_prompt), ("Negative", e.negative_prompt)):
-        console.print(f"[bold]{side} prompt:[/]")
-        console.print(escape(text) if text is not None else "[dim](none)[/]", highlight=False)
-    for s in e.stages[1:]:
-        for side, text, primary in (
-            ("positive", s.positive_prompt, e.positive_prompt),
-            ("negative", s.negative_prompt, e.negative_prompt),
-        ):
-            if text != primary:
-                console.print(f"[bold]Stage {s.index} {side} prompt:[/]")
-                console.print(
-                    escape(text) if text is not None else "[dim](none)[/]", highlight=False
-                )
-
-    for image in e.input_images:
-        console.print(
-            f"Input image: node {image.node_id} {escape(image.filename or '?')} "
-            f"sha256 {image.sha256 or '?'}"
-        )
-    reachable = sum(1 for g in e.generic_inputs if g.reachable)
-    console.print(f"Generic inputs: {len(e.generic_inputs)} ({reachable} reachable)")
+        render_analysis(Console(), file, result, config.graph.output_classes)
 
 
 def _collection() -> CollectionStore:

@@ -29,26 +29,13 @@ export function Modal({
       e.preventDefault();
       onClose();
     } else if (e.key === "Tab") {
-      const focusable = [
-        ...(ref.current?.querySelectorAll<HTMLElement>(
-          "input, textarea, select, a[href], button:not(:disabled)",
-        ) ?? []),
-      ];
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
+      trapFocus(e, ref.current);
     }
   };
 
   return (
     <div
-      className={`fixed inset-0 z-[70] flex justify-center bg-scrim/40 ${
+      className={`fixed inset-0 z-[70] flex justify-center bg-scrim/40 motion-safe:animate-fade-in ${
         align === "top" ? "items-start pt-[5vh]" : "items-center"
       }`}
       onMouseDown={(e) => {
@@ -65,11 +52,23 @@ export function Modal({
         aria-label={title}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`${width} max-h-[90vh] max-w-[90vw] overflow-y-auto rounded-lg bg-surface p-4 shadow-2xl outline-none`}
+        className={`${width} max-h-[90vh] max-w-[90vw] overflow-y-auto rounded bg-surface p-4 shadow-2xl outline-none motion-safe:animate-pop-in`}
       >
         <h2 className="mb-3 font-semibold">{title}</h2>
         {children}
       </div>
     </div>
   );
+}
+
+const FOCUSABLE = "input, textarea, select, a[href], button:not(:disabled)";
+
+/** Tab past the last field goes back to the first, Shift+Tab before the first to the last. */
+function trapFocus(e: KeyboardEvent, container: HTMLElement | null): void {
+  const focusable = [...(container?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
+  const [first, last] = [focusable[0], focusable.at(-1)];
+  const [edge, wrapTo] = e.shiftKey ? [first, last] : [last, first];
+  if (document.activeElement !== edge) return;
+  e.preventDefault();
+  wrapTo?.focus();
 }

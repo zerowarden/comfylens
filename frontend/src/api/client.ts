@@ -16,9 +16,6 @@ import type {
   LibraryInfo,
   LinkRequest,
   LinkResponse,
-  NodeKeysResponse,
-  NodeStatsRequest,
-  NodeStatsResponse,
   PromptInput,
   PromptsRequest,
   PromptsResponse,
@@ -27,10 +24,10 @@ import type {
   RenameRequest,
   RenameResponse,
   SavedPrompt,
-  Scope,
   StatsRequest,
   StatsResponse,
-  TextDraftRequest,
+  TagRequest,
+  TagResponse,
   TimelineRequest,
   TimelineResponse,
   TrashRequest,
@@ -87,22 +84,26 @@ async function download(path: string): Promise<{ blob: Blob; name: string | null
   return { blob: await response.blob(), name };
 }
 
+interface ErrorPayload {
+  warming?: boolean;
+  error?: { code?: string; message?: string };
+}
+
+/** An error response's JSON body; empty when it has none. */
+async function errorPayload(response: Response): Promise<ErrorPayload> {
+  try {
+    const payload: unknown = await response.json();
+    return payload && typeof payload === "object" ? payload : {};
+  } catch {
+    return {}; // Not JSON: keep the status text.
+  }
+}
+
 async function parse<T>(response: Response): Promise<T> {
   if (response.ok) return (await response.json()) as T;
-
-  let payload: unknown = null;
-  try {
-    payload = await response.json();
-  } catch {
-    // Not JSON: keep the status text.
-  }
-  if (payload && typeof payload === "object") {
-    const p = payload as { warming?: boolean; error?: { code?: string; message?: string } };
-    if (p.warming) throw new ApiError(response.status, "warming", WARMING_TEXT, true);
-    if (p.error) {
-      throw new ApiError(response.status, p.error.code ?? "error", p.error.message ?? "");
-    }
-  }
+  const { warming, error } = await errorPayload(response);
+  if (warming) throw new ApiError(response.status, "warming", WARMING_TEXT, true);
+  if (error) throw new ApiError(response.status, error.code ?? "error", error.message ?? "");
   throw new ApiError(response.status, "http", `${response.status} ${response.statusText}`);
 }
 
@@ -110,6 +111,7 @@ export const api = {
   library: () => request<LibraryInfo>("/api/library"),
   indexStatus: () => request<IndexStatusModel>("/api/index/status"),
   rescan: () => request<IndexStatusModel>("/api/index/rescan", {}),
+  fix: () => request<IndexStatusModel>("/api/index/fix", {}),
   facets: () => request<Facets>("/api/facets"),
   images: (q: ImagesQuery) => request<ImagesPage>("/api/images/query", q),
   ids: (q: IdsQuery) => request<IdsResponse>("/api/images/ids", q),
@@ -119,14 +121,14 @@ export const api = {
     request<RenameResponse>(`/api/images/${id}/rename`, { name } satisfies RenameRequest),
   trash: (ids: number[]) =>
     request<TrashResponse>("/api/images/trash", { ids } satisfies TrashRequest),
+  tag: (ids: number[], add: string[], remove: string[]) =>
+    request<TagResponse>("/api/images/tags", { ids, add, remove } satisfies TagRequest),
   stripped: (id: number) => download(`/api/images/${id}/stripped`),
   stats: (q: StatsRequest) => request<StatsResponse>("/api/stats", q),
   timeline: (q: TimelineRequest) => request<TimelineResponse>("/api/timeline", q),
   prompts: (q: PromptsRequest) => request<PromptsResponse>("/api/prompts", q),
   distinctive: (q: DistinctiveRequest) =>
     request<DistinctiveResponse>("/api/prompts/distinctive", q),
-  nodeKeys: (q: Scope) => request<NodeKeysResponse>("/api/node-inputs/keys", q),
-  nodeStats: (q: NodeStatsRequest) => request<NodeStatsResponse>("/api/node-inputs/stats", q),
   collection: (q: { q?: string; tag?: string | null; family?: string | null }) => {
     const p = new URLSearchParams();
     if (q.q?.trim()) p.set("q", q.q.trim());
@@ -150,7 +152,6 @@ export const api = {
     } satisfies UnlinkRequest),
   draftFromFile: (file: Blob) => upload<Draft>("/api/collection/drafts/upload", file),
   draftFromImage: (id: number) => request<Draft>(`/api/collection/drafts/from-image/${id}`, {}),
-  draftFromText: (body: TextDraftRequest) => request<Draft>("/api/collection/drafts/text", body),
   imageCollection: (id: number) => request<ImageCollection>(`/api/collection/for-image/${id}`),
   originalRaw: (hash: string) => request<RawOriginal>(`/api/collection/originals/${hash}/raw`),
   importCollection: (archive: Blob) => upload<ImportResponse>("/api/collection/import", archive),

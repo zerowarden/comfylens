@@ -14,10 +14,10 @@ export const SETTING_LABELS = {
   seed: "seed",
 } as const;
 
-export type SettingKey = keyof typeof SETTING_LABELS;
+type SettingKey = keyof typeof SETTING_LABELS;
 
 /** In declaration order, so every list presents the settings the same way. */
-export const SETTING_KEYS = Object.keys(SETTING_LABELS) as SettingKey[];
+const SETTING_KEYS = Object.keys(SETTING_LABELS) as SettingKey[];
 
 /** A saved prompt's known settings as label/value rows; unknown ones are left out. */
 export function promptSettingsRows(s: PromptSettings): { label: string; value: string }[] {

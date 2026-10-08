@@ -8,10 +8,11 @@ transform. Everything else goes, including ComfyUI's prompt and workflow, EXIF, 
 comments, timestamps, physical size, embedded thumbnails and any bytes after the image ends.
 """
 
-import struct
+from collections.abc import Iterator
 
-from comfylens.metadata.jpeg import SOI, STANDALONE_MARKERS
-from comfylens.metadata.png import SIGNATURE
+from comfylens.metadata.jpeg import EOI, SOI, Segment, jpeg_segments
+from comfylens.metadata.png import SIGNATURE, png_chunks
+from comfylens.metadata.types import Truncated
 
 
 class CannotStrip(ValueError):
@@ -38,9 +39,7 @@ _PNG_KEEP = frozenset(
         b"fdAT",
     }
 )
-_PNG_CHUNK = struct.Struct(">I4s")
-
-_EOI, _SOS, _APP0, _APP2, _APP14, _COM = 0xD9, 0xDA, 0xE0, 0xE2, 0xEE, 0xFE
+_APP0, _APP2, _APP14, _COM = 0xE0, 0xE2, 0xEE, 0xFE
 _APPS = range(0xE0, 0xF0)
 _JFIF = b"JFIF\0"
 _JFIF_HEADER = 12  # identifier, version, density units, x and y density; then thumbnail size
@@ -61,71 +60,52 @@ def strip_png(data: bytes) -> bytes:
     if not data.startswith(SIGNATURE):
         raise CannotStrip("missing PNG signature")
     view = memoryview(data)
-    out: list[bytes | memoryview] = [SIGNATURE]
-    pos, end = len(SIGNATURE), len(view)
-    while True:
-        if pos + 12 > end:
-            raise CannotStrip("the PNG ends before its IEND chunk")
-        length, ctype = _PNG_CHUNK.unpack_from(view, pos)
-        stop = pos + 12 + length  # length and type, data, CRC
-        if stop > end:
-            raise CannotStrip("the PNG ends inside a chunk")
-        if ctype in _PNG_KEEP:
-            out.append(view[pos:stop])
-        pos = stop
-        if ctype == b"IEND":
-            return b"".join(out)
+    try:
+        chunks = list(png_chunks(view))
+    except Truncated as e:
+        raise CannotStrip(str(e)) from e
+    return b"".join([SIGNATURE, *(view[c.start : c.stop] for c in chunks if c.type in _PNG_KEEP)])
 
 
 def strip_jpeg(data: bytes) -> bytes:
     if not data.startswith(SOI):
         raise CannotStrip("missing JPEG SOI marker")
-    view = memoryview(data)
-    out: list[bytes | memoryview] = [SOI]
-    pos, end = len(SOI), len(view)
+    try:
+        return b"".join([SOI, *_jpeg_kept(data)])
+    except Truncated as e:
+        raise CannotStrip(str(e)) from e
+
+
+def _jpeg_kept(data: bytes) -> Iterator[bytes | memoryview]:
+    """The kept segments, each scan's entropy-coded data after its SOS, through EOI. Bytes after
+    EOI are dropped."""
+    view, pos = memoryview(data), len(SOI)
     while True:
-        if pos >= end or view[pos] != 0xFF:
-            raise CannotStrip("the JPEG is truncated or malformed")
-        while pos < end and view[pos] == 0xFF:  # fill bytes may pad any marker
-            pos += 1
-        if pos >= end:
-            raise CannotStrip("the JPEG ends inside a marker")
-        marker = view[pos]
-        pos += 1
-        if marker == _EOI:
-            out.append(bytes((0xFF, _EOI)))
-            return b"".join(out)
-        if marker in STANDALONE_MARKERS:
-            out.append(bytes((0xFF, marker)))
-            continue
-        if pos + 2 > end:
-            raise CannotStrip("the JPEG ends inside a segment")
-        length = int.from_bytes(view[pos : pos + 2])
-        if length < 2 or pos + length > end:
-            raise CannotStrip("the JPEG ends inside a segment")
-        payload = view[pos + 2 : pos + length]
-        if marker == _APP0 and bytes(payload[: len(_JFIF)]) == _JFIF:
-            if len(payload) < _JFIF_HEADER:
-                raise CannotStrip("the JPEG has a short JFIF header")
-            # The header without its thumbnail: a zero width and height, no pixels.
-            jfif = bytes(payload[:_JFIF_HEADER]) + b"\0\0"
-            out.append(bytes((0xFF, _APP0)) + (len(jfif) + 2).to_bytes(2) + jfif)
-        elif (marker not in _APPS and marker != _COM) or _keeps_app(marker, payload):
-            out.append(view[pos - 2 : pos + length])
-        pos += length
-        if marker == _SOS:
-            scan_end = _scan_end(data, pos)
-            out.append(view[pos:scan_end])
-            pos = scan_end
+        segments = list(jpeg_segments(view, pos))
+        yield from (kept for s in segments if (kept := _kept(view, s)) is not None)
+        last = segments[-1]
+        if last.marker == EOI:
+            return
+        pos = _scan_end(data, last.stop)
+        yield view[last.stop : pos]
+
+
+def _kept(view: memoryview, s: Segment) -> bytes | memoryview | None:
+    """The segment as the copy holds it: JFIF without its thumbnail, only the application
+    segments that change how the pixels decode or look, and everything else as it is."""
+    if s.marker == _APP0 and bytes(s.payload[: len(_JFIF)]) == _JFIF:
+        if len(s.payload) < _JFIF_HEADER:
+            raise CannotStrip("the JPEG has a short JFIF header")
+        jfif = bytes(s.payload[:_JFIF_HEADER]) + b"\0\0"  # a zero width and height, no pixels
+        return bytes((0xFF, _APP0)) + (len(jfif) + 2).to_bytes(2) + jfif
+    if s.marker in _APPS or s.marker == _COM:
+        return view[s.start : s.stop] if _keeps_app(s.marker, s.payload) else None
+    return view[s.start : s.stop]
 
 
 def _keeps_app(marker: int, payload: memoryview) -> bool:
-    """The application segments that change how the pixels decode or look."""
-    if marker == _APP2:
-        return bytes(payload[: len(_ICC)]) == _ICC
-    if marker == _APP14:
-        return bytes(payload[: len(_ADOBE)]) == _ADOBE
-    return False
+    prefix = {_APP2: _ICC, _APP14: _ADOBE}.get(marker)
+    return prefix is not None and bytes(payload[: len(prefix)]) == prefix
 
 
 def _scan_end(data: bytes, pos: int) -> int:
@@ -136,7 +116,7 @@ def _scan_end(data: bytes, pos: int) -> int:
     while True:
         pos = data.find(b"\xff", pos)
         if pos < 0 or pos + 1 >= len(data):
-            raise CannotStrip("the JPEG ends inside its image data")
+            raise Truncated("the JPEG ends inside its image data")
         following = data[pos + 1]
         if following == 0xFF:
             pos += 1

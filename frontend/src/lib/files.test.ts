@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { ImagesPage } from "../api/types";
+import type { ImageItem, ImagesPage } from "../api/types";
 import { imageItem } from "../test/fixtures";
 import {
   attachmentName,
@@ -8,9 +8,13 @@ import {
   chunks,
   extension,
   nameProblem,
+  MAX_TAG_LENGTH,
   nextRemaining,
+  splitTags,
   removeFromPages,
-  renameInPage,
+  retag,
+  tagProblem,
+  updateItems,
   withBaseName,
 } from "./files";
 
@@ -98,14 +102,35 @@ describe("removeFromPages", () => {
   });
 });
 
-describe("renameInPage", () => {
-  it("renames the one item and keeps an unrelated page as it is", () => {
-    const p = page(0, [1, 2]);
-    expect(renameInPage(p, 2, "dir/new.png").items.map((i) => i.rel_path)).toEqual([
-      "1.png",
-      "dir/new.png",
+describe("updateItems", () => {
+  it("changes the given items and keeps an unrelated page as it is", () => {
+    const p = page(0, [1, 2, 3]);
+    const rename = (i: ImageItem) => ({ ...i, rel_path: `new/${i.id}.png` });
+    expect(updateItems(p, new Set([1, 3]), rename).items.map((i) => i.rel_path)).toEqual([
+      "new/1.png",
+      "2.png",
+      "new/3.png",
     ]);
-    expect(renameInPage(p, 9, "x.png")).toBe(p);
+    expect(updateItems(p, new Set([9]), rename)).toBe(p);
+  });
+});
+
+describe("tags", () => {
+  it("parses a comma-separated field", () => {
+    expect(splitTags(" fox , red fox,, ")).toEqual(["fox", "red fox"]);
+    expect(splitTags("")).toEqual([]);
+  });
+
+  it("removes, then adds, keeping tags sorted and unique", () => {
+    expect(retag(["owl", "fox"], ["cat", "fox"], ["owl"])).toEqual(["cat", "fox"]);
+    expect(retag(["fox"], ["fox"], ["fox"])).toEqual(["fox"]); // added back after removal
+  });
+
+  it("mirrors the server's checks", () => {
+    expect(tagProblem("red fox")).toBeNull();
+    expect(tagProblem("é".repeat(MAX_TAG_LENGTH))).toBeNull(); // characters, not bytes
+    expect(tagProblem("x".repeat(MAX_TAG_LENGTH + 1))).toMatch(/at most 64/);
+    expect(tagProblem("a\tb")).toMatch(/control/);
   });
 });
 

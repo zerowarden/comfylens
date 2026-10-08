@@ -46,30 +46,29 @@ def settings_pairs(line: str) -> dict[str, str]:
 def loras(positive: str) -> list[dict[str, Any]]:
     """`<lora:name:weight>` tags, in order. A bare tag has weight 1; `te=` and `unet=` name the
     text-encoder (clip) and model strengths."""
-    out: list[dict[str, Any]] = []
-    for name, args in _LORA.findall(positive):
-        model = clip = None
-        positional: list[float] = []
-        for arg in args.split(":")[1:]:
-            key, _, value = arg.partition("=")
-            if value:
-                number = _float(value)
-                if key.strip().lower() == "unet":
-                    model = number
-                elif key.strip().lower() == "te":
-                    clip = number
-            elif (number := _float(arg)) is not None:
-                positional.append(number)
-        if positional:
-            model = positional[0] if model is None else model
-            # A1111 reads a second positional weight as the model ("unet") strength.
-            clip = positional[0] if clip is None else clip
-            if len(positional) > 1:
-                model = positional[1]
-        if model is None and clip is None:
-            model = clip = 1.0
-        out.append(saved_lora(name.strip(), model, clip))
-    return out
+    return [_lora(name, args.split(":")[1:]) for name, args in _LORA.findall(positive)]
+
+
+def _lora(name: str, args: list[str]) -> dict[str, Any]:
+    named = {
+        key.strip().lower(): _float(value)
+        for key, _, value in (arg.partition("=") for arg in args)
+        if value
+    }
+    positional = [n for arg in args if "=" not in arg and (n := _float(arg)) is not None]
+    model, clip = _strengths(named.get("unet"), named.get("te"), positional)
+    return saved_lora(name.strip(), model, clip)
+
+
+def _strengths(
+    model: float | None, clip: float | None, positional: list[float]
+) -> tuple[float | None, float | None]:
+    """A1111's reading: the first positional weight stands for any strength not named, and a
+    second one is the model ("unet") strength. With no weight at all, both are 1."""
+    first = positional[0] if positional else None
+    model = positional[1] if len(positional) > 1 else first if model is None else model
+    clip = first if clip is None else clip
+    return (1.0, 1.0) if model is None and clip is None else (model, clip)
 
 
 def parse_parameters(text: str) -> dict[str, Any] | None:

@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 
 import { api } from "../api/client";
-import type { FacetValue, NumericFilterField, Range } from "../api/types";
+import type { FacetValue, Facets, Filters, NumericFilterField, Range } from "../api/types";
 import { useSavedPrompt } from "../lib/collection";
-import { fmtInt, fmtNum } from "../lib/format";
+import { fmtInt, fmtNum, fractionOf } from "../lib/format";
 import { useDebounced } from "../lib/hooks";
 import {
   NUMERIC_STEPS,
@@ -14,7 +14,17 @@ import {
   type ListField,
 } from "../state/filters";
 import { ChainText, Glyph } from "./icons";
-import { Button, ErrorState, FIELD, FamilyDot, Segmented, ShowAllToggle } from "./ui";
+import {
+  Button,
+  ClearButton,
+  ErrorState,
+  FIELD,
+  FamilyDot,
+  Reveal,
+  SectionTitle,
+  Segmented,
+  ShowAllToggle,
+} from "./ui";
 
 const SHOWN = 8;
 
@@ -24,14 +34,12 @@ function FacetList({
   selected,
   onToggle,
   colored = false,
-  extra,
 }: {
   title: string;
   values: FacetValue[];
   selected: string[];
   onToggle: (value: string) => void;
   colored?: boolean;
-  extra?: ReactNode;
 }) {
   const [all, setAll] = useState(false);
   const [search, setSearch] = useState("");
@@ -41,13 +49,11 @@ function FacetList({
     all || search ? matching : matching.filter((v, i) => i < SHOWN || selected.includes(v.value));
   if (values.length === 0) return null;
   return (
-    <div className="border-b border-line px-3 py-2">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-xs font-semibold tracking-wide text-muted uppercase">{title}</span>
-        {extra}
-      </div>
+    <Section>
+      <SectionTitle>{title}</SectionTitle>
       {values.length > 12 && (
         <input
+          autoComplete="off"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search"
@@ -57,7 +63,7 @@ function FacetList({
       <ul>
         {shown.map((v) => (
           <li key={v.value}>
-            <label className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-hover">
+            <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 transition-colors duration-(--dur-fast) hover:bg-hover">
               <input
                 type="checkbox"
                 checked={selected.includes(v.value)}
@@ -75,20 +81,43 @@ function FacetList({
       {!search && matching.length > SHOWN && (
         <ShowAllToggle count={matching.length} all={all} onToggle={() => setAll(!all)} />
       )}
-    </div>
+    </Section>
   );
 }
 
-/** Two overlaid range inputs; the filter is dropped when the range covers everything. */
+function Section({ children }: { children: ReactNode }) {
+  return <div className="border-b border-line px-3 py-2">{children}</div>;
+}
+
+/** Range sliders for a field whose values span more than one number. */
 function RangeFilter({ field, range }: { field: NumericFilterField; range: Range }) {
+  if (range.min === null || range.max === null || range.min === range.max) return null;
+  return <RangeSlider field={field} min={range.min} max={range.max} />;
+}
+
+type Span = [number, number];
+
+/** A comparable key for an optional range. */
+const spanKey = (span: Span | undefined) => span?.join(",") ?? "";
+
+/** The span with one end moved to `to`, never past the other end. */
+const moveEnd = ([lo, hi]: Span, end: 0 | 1, to: number): Span =>
+  end === 0 ? [Math.min(to, hi), hi] : [lo, Math.max(to, lo)];
+
+/** The numeric filters with `field` set to `span`, or without it when `span` is undefined. */
+function withSpan(numeric: Filters["numeric"], field: NumericFilterField, span: Span | undefined) {
+  const rest = Object.fromEntries(Object.entries(numeric).filter(([k]) => k !== field));
+  return span ? { ...rest, [field]: span } : rest;
+}
+
+/** Two overlaid range inputs; the filter is dropped when the range covers everything. */
+function RangeSlider({ field, min, max }: { field: NumericFilterField; min: number; max: number }) {
   const current = useFilters((s) => s.filters.numeric[field]);
   const update = useFilters((s) => s.update);
-  const min = range.min ?? 0;
-  const max = range.max ?? 0;
-  const external: [number, number] = current ?? [min, max];
-  const [value, setValue] = useState<[number, number]>(external);
+  const external: Span = current ?? [min, max];
+  const [value, setValue] = useState<Span>(external);
   const [seen, setSeen] = useState(external);
-  if (seen[0] !== external[0] || seen[1] !== external[1]) {
+  if (spanKey(seen) !== spanKey(external)) {
     // Cleared or changed elsewhere (Clear filters, the URL): follow the store.
     setSeen(external);
     setValue(external);
@@ -96,64 +125,52 @@ function RangeFilter({ field, range }: { field: NumericFilterField; range: Range
   const committed = useDebounced(value, 300);
 
   useEffect(() => {
-    const full = committed[0] <= min && committed[1] >= max;
-    const same = current && current[0] === committed[0] && current[1] === committed[1];
-    if (same || (full && !current)) return;
-    update((f) => {
-      const numeric = { ...f.numeric };
-      if (full) delete numeric[field];
-      else numeric[field] = committed;
-      return { ...f, numeric };
-    });
+    const next = committed[0] <= min && committed[1] >= max ? undefined : committed;
+    if (spanKey(next) === spanKey(current)) return;
+    update((f) => ({ ...f, numeric: withSpan(f.numeric, field, next) }));
     // Commit only when the debounced value changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [committed]);
 
-  if (range.min === null || range.max === null || range.min === range.max) return null;
-  const step = NUMERIC_STEPS[field];
-  const input =
-    "pointer-events-none absolute inset-0 w-full appearance-none bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto";
+  const narrowed = value[0] > min || value[1] < max;
+  // The lower thumb goes on top once past the middle, so two thumbs pushed to the top end can
+  // still be pulled apart.
+  const lowOnTop = value[0] > (min + max) / 2;
   return (
-    <div className="mb-2">
-      <div className="flex justify-between text-xs">
-        <span>{field}</span>
-        <span className="text-muted tabular-nums">
+    <div className="mb-1.5">
+      <div className="flex items-center gap-1 text-xs">
+        <span className="flex-1">{field}</span>
+        <span className={`tabular-nums ${narrowed ? "text-accent-text" : "text-muted"}`}>
           {fmtNum(value[0])} – {fmtNum(value[1])}
-          {current && (
-            <button
-              type="button"
-              title={`Clear the ${field} filter`}
-              aria-label={`Clear the ${field} filter`}
-              className="ml-1 align-[-0.125em] hover:text-danger"
-              onClick={() => setValue([min, max])}
-            >
-              <Glyph name="x" className="size-3" />
-            </button>
-          )}
+        </span>
+        {/* Always there, hidden when unused: the numbers never shift when it appears. */}
+        <span className={narrowed ? "" : "invisible"}>
+          <ClearButton label={`Clear the ${field} filter`} onClick={() => setValue([min, max])} />
         </span>
       </div>
-      <div className="relative h-5">
-        <div className="absolute top-2 h-1 w-full rounded bg-track" />
-        <input
-          type="range"
-          className={input}
-          min={min}
-          max={max}
-          step={step}
-          value={value[0]}
-          aria-label={`${field} minimum`}
-          onChange={(e) => setValue([Math.min(Number(e.target.value), value[1]), value[1]])}
+      <div className="relative h-4">
+        <div className="absolute inset-x-0 top-1.5 h-1 rounded bg-track" />
+        {/* The chosen span; thumb centres travel 6px in from each end (see index.css). */}
+        <div
+          className="absolute top-1.5 h-1 rounded bg-accent"
+          style={{
+            left: `calc(6px + (100% - 12px) * ${fractionOf(value[0], min, max)})`,
+            right: `calc(6px + (100% - 12px) * ${1 - fractionOf(value[1], min, max)})`,
+          }}
         />
-        <input
-          type="range"
-          className={input}
-          min={min}
-          max={max}
-          step={step}
-          value={value[1]}
-          aria-label={`${field} maximum`}
-          onChange={(e) => setValue([value[0], Math.max(Number(e.target.value), value[0])])}
-        />
+        {([0, 1] as const).map((end) => (
+          <input
+            key={end}
+            type="range"
+            className={`dual absolute inset-0 w-full ${end === 0 && lowOnTop ? "z-10" : ""}`}
+            min={min}
+            max={max}
+            step={NUMERIC_STEPS[field]}
+            value={value[end]}
+            aria-label={`${field} ${end === 0 ? "minimum" : "maximum"}`}
+            onChange={(e) => setValue(moveEnd(value, end, Number(e.target.value)))}
+          />
+        ))}
       </div>
     </div>
   );
@@ -175,14 +192,26 @@ function TextSearch() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced]);
   return (
-    <div className="border-b border-line px-3 py-2">
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="Search prompts"
-        className={`w-full px-2 py-1 ${FIELD}`}
-      />
-    </div>
+    <Section>
+      <div className="relative">
+        <Glyph
+          name="search"
+          className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted"
+        />
+        <input
+          autoComplete="off"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Search prompts"
+          className={`w-full py-1 pr-6 pl-7 ${FIELD}`}
+        />
+        {value && (
+          <span className="absolute top-1/2 right-1.5 flex -translate-y-1/2">
+            <ClearButton label="Clear the search" onClick={() => setValue("")} />
+          </span>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -190,19 +219,19 @@ function TextSearch() {
 function SentenceFilter() {
   const sentences = useFilters((s) => s.filters.sentences);
   const update = useFilters((s) => s.update);
-  if (sentences.length === 0) return null;
   return (
-    <div className="border-b border-line px-3 py-2">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-xs font-semibold tracking-wide text-muted uppercase">
+    <Reveal open={sentences.length > 0}>
+      <Section>
+        <SectionTitle
+          right={<Button onClick={() => update((f) => ({ ...f, sentences: [] }))}>Clear</Button>}
+        >
           Similar sentences
-        </span>
-        <Button onClick={() => update((f) => ({ ...f, sentences: [] }))}>Clear</Button>
-      </div>
-      <div className="text-xs text-muted">
-        {fmtInt(sentences.length)} similar {sentences.length === 1 ? "sentence" : "sentences"}
-      </div>
-    </div>
+        </SectionTitle>
+        <div className="text-xs text-muted">
+          {fmtInt(sentences.length)} similar {sentences.length === 1 ? "sentence" : "sentences"}
+        </div>
+      </Section>
+    </Reveal>
   );
 }
 
@@ -213,20 +242,14 @@ function CollectionFilter() {
   const update = useFilters((s) => s.update);
   const prompt = useSavedPrompt(promptId);
   return (
-    <div className="border-b border-line px-3 py-2">
-      <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
-        Collection
-      </div>
-      <Segmented
-        value={saved === null ? "any" : saved ? "saved" : "unsaved"}
-        options={[
-          { value: "any", label: "Any" },
-          { value: "saved", label: "Saved" },
-          { value: "unsaved", label: "Not saved" },
-        ]}
-        onChange={(v) => update((x) => ({ ...x, saved: v === "any" ? null : v === "saved" }))}
+    <Section>
+      <SectionTitle>Collection</SectionTitle>
+      <YesNoAny
+        value={saved}
+        labels={["Any", "Saved", "Not saved"]}
+        onChange={(value) => update((x) => ({ ...x, saved: value }))}
       />
-      {promptId !== null && (
+      <Reveal open={promptId !== null}>
         <div className="mt-2 flex items-center gap-1.5 rounded bg-accent/10 px-2 py-1 text-xs">
           <Glyph name="bookmark" className="size-3 shrink-0 text-link" />
           <span
@@ -235,17 +258,133 @@ function CollectionFilter() {
           >
             {prompt.data?.title ?? (prompt.isError ? "a deleted saved prompt" : "…")}
           </span>
-          <button
-            type="button"
-            title="Clear the saved prompt filter"
-            aria-label="Clear the saved prompt filter"
-            className="hover:text-danger"
+          <ClearButton
+            label="Clear the saved prompt filter"
             onClick={() => update((x) => ({ ...x, saved_prompt: null }))}
-          >
-            <Glyph name="x" className="size-3" />
-          </button>
+          />
         </div>
-      )}
+      </Reveal>
+    </Section>
+  );
+}
+
+const YES_NO_ANY = { any: null, yes: true, no: false } as const;
+type YesNoAnyKey = keyof typeof YES_NO_ANY;
+
+/** A segmented any / yes / no control for an optional boolean filter. */
+function YesNoAny({
+  value,
+  labels: [any, yes, no],
+  onChange,
+}: {
+  value: boolean | null;
+  labels: [string, string, string];
+  onChange: (value: boolean | null) => void;
+}) {
+  const key: YesNoAnyKey = value === null ? "any" : value ? "yes" : "no";
+  return (
+    <Segmented<YesNoAnyKey>
+      value={key}
+      options={[
+        { value: "any", label: any },
+        { value: "yes", label: yes },
+        { value: "no", label: no },
+      ]}
+      onChange={(v) => onChange(YES_NO_ANY[v])}
+    />
+  );
+}
+
+const DATE_ENDS = ["date_from", "date_to"] as const;
+
+function DateFilter({ range }: { range: Facets["date_range"] }) {
+  const filters = useFilters((s) => s.filters);
+  const update = useFilters((s) => s.update);
+  return (
+    <Section>
+      <SectionTitle>Date</SectionTitle>
+      <div className="flex items-center gap-1">
+        {DATE_ENDS.map((end, i) => (
+          <Fragment key={end}>
+            {i > 0 && <span>–</span>}
+            <input
+              autoComplete="off"
+              type="date"
+              className={`w-full min-w-0 px-1 ${FIELD}`}
+              value={filters[end] ?? ""}
+              min={range.min ?? undefined}
+              max={range.max ?? undefined}
+              onChange={(e) => update((x) => ({ ...x, [end]: e.target.value || null }))}
+            />
+          </Fragment>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/** The facet lists, in sidebar order; the LoRA list goes after the first LORA_AFTER. */
+const LISTS: [string, ListField][] = [
+  ["Tags", "tags"],
+  ["Family", "families"],
+  ["Base model", "base_models"],
+  ["Sampler", "samplers"],
+  ["Scheduler", "schedulers"],
+];
+const LORA_AFTER = 3;
+
+/** Every filter whose options come from the library's facets. */
+function FacetFilters({ facets }: { facets: Facets }) {
+  const filters = useFilters((s) => s.filters);
+  const toggle = useFilters((s) => s.toggle);
+  const toggleLora = useFilters((s) => s.toggleLora);
+  const lists = LISTS.map(([title, field]) => (
+    <FacetList
+      key={field}
+      title={title}
+      values={facets[field]}
+      selected={filters[field]}
+      onToggle={(v) => toggle(field, v)}
+      colored={field === "families"}
+    />
+  ));
+  return (
+    <>
+      {lists.slice(0, LORA_AFTER)}
+      <FacetList
+        title="LoRA"
+        values={facets.loras}
+        selected={filters.loras.names}
+        onToggle={toggleLora}
+      />
+      {lists.slice(LORA_AFTER)}
+      <DateFilter range={facets.date_range} />
+      <Section>
+        <SectionTitle>Settings</SectionTitle>
+        {RANGE_SLIDER_FIELDS.map((field) => {
+          const range = facets.numeric_ranges[field];
+          return range && <RangeFilter key={field} field={field} range={range} />;
+        })}
+      </Section>
+    </>
+  );
+}
+
+/** Stand-ins for the facet lists while they load, so the sections below don't jump down. */
+function FacetSkeleton() {
+  return (
+    <div aria-hidden="true" className="animate-pulse">
+      {[5, 4, 6].map((rows, i) => (
+        <Section key={i}>
+          <div className="mb-2 h-3 w-16 rounded bg-subtle" />
+          {Array.from({ length: rows }, (_, j) => (
+            <div key={j} className="my-1.5 flex items-center gap-2 px-1">
+              <div className="size-3.5 rounded bg-subtle" />
+              <div className="h-3 flex-1 rounded bg-subtle" />
+            </div>
+          ))}
+        </Section>
+      ))}
     </div>
   );
 }
@@ -253,22 +392,7 @@ function CollectionFilter() {
 export default function FilterSidebar() {
   const facets = useQuery({ queryKey: ["facets"], queryFn: api.facets });
   const filters = useFilters((s) => s.filters);
-  const toggle = useFilters((s) => s.toggle);
-  const toggleLora = useFilters((s) => s.toggleLora);
-  const update = useFilters((s) => s.update);
   const clear = useFilters((s) => s.clear);
-  const f = facets.data;
-
-  const lists: [string, ListField, FacetValue[]][] = f
-    ? [
-        ["Family", "families", f.families],
-        ["Base model", "base_models", f.base_models],
-        ["Sampler", "samplers", f.samplers],
-        ["Scheduler", "schedulers", f.schedulers],
-        ["Status", "statuses", f.statuses],
-      ]
-    : [];
-
   return (
     <aside className="flex w-[280px] shrink-0 flex-col overflow-y-auto border-r border-line">
       <div className="flex items-center justify-between px-3 py-2">
@@ -279,96 +403,15 @@ export default function FilterSidebar() {
       </div>
       <TextSearch />
       {facets.isError && <ErrorState error={facets.error} className="px-3 py-2" />}
-      {lists.slice(0, 2).map(([title, field, values]) => (
-        <FacetList
-          key={field}
-          title={title}
-          values={values}
-          selected={filters[field]}
-          onToggle={(v) => toggle(field, v)}
-          colored={field === "families"}
-        />
-      ))}
-      {f && (
-        <FacetList
-          title="LoRA"
-          values={f.loras}
-          selected={filters.loras.names}
-          onToggle={toggleLora}
-          extra={
-            <Segmented
-              value={filters.loras.mode}
-              options={[
-                { value: "any", label: "any" },
-                { value: "all", label: "all" },
-              ]}
-              onChange={(mode) => update((x) => ({ ...x, loras: { ...x.loras, mode } }))}
-            />
-          }
-        />
-      )}
-      {lists.slice(2).map(([title, field, values]) => (
-        <FacetList
-          key={field}
-          title={title}
-          values={values}
-          selected={filters[field]}
-          onToggle={(v) => toggle(field, v)}
-        />
-      ))}
-      {f && (
-        <div className="border-b border-line px-3 py-2">
-          <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">Date</div>
-          <div className="flex items-center gap-1">
-            <input
-              type="date"
-              className={`w-full px-1 ${FIELD}`}
-              value={filters.date_from ?? ""}
-              min={f.date_range.min ?? undefined}
-              max={f.date_range.max ?? undefined}
-              onChange={(e) => update((x) => ({ ...x, date_from: e.target.value || null }))}
-            />
-            <span>–</span>
-            <input
-              type="date"
-              className={`w-full px-1 ${FIELD}`}
-              value={filters.date_to ?? ""}
-              min={f.date_range.min ?? undefined}
-              max={f.date_range.max ?? undefined}
-              onChange={(e) => update((x) => ({ ...x, date_to: e.target.value || null }))}
-            />
-          </div>
+      {facets.data ? (
+        <div className="motion-safe:animate-fade-in">
+          <FacetFilters facets={facets.data} />
         </div>
-      )}
-      {f && (
-        <div className="border-b border-line px-3 py-2">
-          <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
-            Settings
-          </div>
-          {RANGE_SLIDER_FIELDS.map((field) => {
-            const range = f.numeric_ranges[field];
-            return range ? <RangeFilter key={field} field={field} range={range} /> : null;
-          })}
-        </div>
+      ) : (
+        !facets.isError && <FacetSkeleton />
       )}
       <CollectionFilter />
       <SentenceFilter />
-      <div className="px-3 py-2">
-        <div className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
-          Warnings
-        </div>
-        <Segmented
-          value={filters.has_warnings === null ? "any" : filters.has_warnings ? "with" : "without"}
-          options={[
-            { value: "any", label: "Any" },
-            { value: "with", label: "With warnings" },
-            { value: "without", label: "Without" },
-          ]}
-          onChange={(v) =>
-            update((x) => ({ ...x, has_warnings: v === "any" ? null : v === "with" }))
-          }
-        />
-      </div>
     </aside>
   );
 }

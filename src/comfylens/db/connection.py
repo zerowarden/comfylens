@@ -117,7 +117,6 @@ def _fts5_available(conn: sqlite3.Connection) -> bool:
 class Catalog:
     conn: sqlite3.Connection
     path: Path
-    created: bool  # built from scratch by this open
     stale: bool  # extractor version or config hash differ: re-extract from raw JSON
 
 
@@ -135,7 +134,7 @@ def open_catalog(path: Path, root: Path, config_hash: str) -> Catalog:
         except sqlite3.DatabaseError:
             schema = None  # not a readable database: rebuild below
         if conn is not None and schema == str(version.SCHEMA_VERSION):
-            return Catalog(conn, path, created=False, stale=is_stale(conn, config_hash))
+            return Catalog(conn, path, stale=is_stale(conn, config_hash))
         if conn is not None:
             conn.close()
         for suffix in ("", "-wal", "-shm"):
@@ -156,4 +155,4 @@ def open_catalog(path: Path, root: Path, config_hash: str) -> Catalog:
         set_meta(conn, "extractor_version", str(version.EXTRACTOR_VERSION))
         set_meta(conn, "config_hash", config_hash)
         set_meta(conn, "library_root", str(root))
-    return Catalog(conn, path, created=True, stale=False)
+    return Catalog(conn, path, stale=False)

@@ -16,25 +16,13 @@ import { promptSettingsRows } from "./settings";
 export function seedDraft(drafts: Draft[]): { draft: Draft; references: CollectionImage[] } | null {
   const first = drafts.find((d) => d.metadata !== "none") ?? drafts[0];
   if (!first) return null;
-  const seen = new Set<string>();
-  const references: CollectionImage[] = [];
-  for (const d of drafts) {
-    if (d.original && !seen.has(d.original.content_hash)) {
-      seen.add(d.original.content_hash);
-      references.push(d.original);
-    }
-  }
-  return { draft: first, references };
+  return { draft: first, references: appendReferences([], drafts) };
 }
 
 /** Tags typed as "a, b , a" -> ["a", "b"]; the server normalizes case and spacing again. */
 export function parseTags(text: string): string[] {
-  const out: string[] = [];
-  for (const raw of text.split(",")) {
-    const tag = raw.trim().replace(/\s+/g, " ").toLowerCase();
-    if (tag && !out.includes(tag)) out.push(tag);
-  }
-  return out;
+  const tags = text.split(",").map((raw) => raw.trim().replace(/\s+/g, " ").toLowerCase());
+  return [...new Set(tags.filter(Boolean))];
 }
 
 export function emptySettings(): PromptSettings {
@@ -101,13 +89,8 @@ export function appendReferences(
   references: CollectionImage[],
   drafts: Draft[],
 ): CollectionImage[] {
-  const out = [...references];
-  for (const d of drafts) {
-    if (d.original && !out.some((r) => r.content_hash === d.original!.content_hash)) {
-      out.push(d.original);
-    }
-  }
-  return out;
+  const all = [...references, ...drafts.flatMap((d) => (d.original ? [d.original] : []))];
+  return all.filter((r, i) => all.findIndex((o) => o.content_hash === r.content_hash) === i);
 }
 
 /**

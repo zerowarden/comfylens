@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from comfylens.analytics.collection import library_counts, library_ids
+from comfylens.analytics import library_counts, library_ids
 from comfylens.api.errors import ApiError, not_found, parse_id
 from comfylens.api.schemas import (
     CollectionList,
@@ -37,22 +37,23 @@ from comfylens.api.server import (
     server_of,
     stored_json,
 )
-from comfylens.collection.archive import InvalidArchive, export_filename, export_zip, import_zip
-from comfylens.collection.drafts import (
-    MAX_UPLOAD_BYTES,
-    UnsupportedImage,
-    build_draft,
-    text_draft,
-)
-from comfylens.collection.models import EXTENSIONS
-from comfylens.collection.store import (
+from comfylens.collection import (
+    EXTENSIONS,
     HASH,
+    MAX_UPLOAD_BYTES,
     CollectionStore,
+    InvalidArchive,
     InvalidInput,
     PromptData,
     UnknownOriginal,
+    UnsupportedImage,
+    build_draft,
+    export_filename,
+    export_zip,
+    import_zip,
+    text_draft,
 )
-from comfylens.extract.normalize import prompt_key
+from comfylens.extract import prompt_key
 from comfylens.index import file_ops
 
 router = APIRouter(prefix="/api/collection")

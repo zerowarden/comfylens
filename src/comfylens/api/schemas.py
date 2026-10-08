@@ -1,22 +1,18 @@
 """Request and response models for every endpoint. The frontend mirrors these types."""
 
 from datetime import date
-from typing import Any, Literal, get_args
+from typing import Annotated, Any, Literal, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
-from comfylens.analytics.loras import LoraKey
-from comfylens.analytics.prompts import By, Side
-from comfylens.analytics.scope import Filters, Scope
-from comfylens.analytics.timeline import Bucket
-from comfylens.collection.models import MAX_TITLE, Hash, Role
-from comfylens.collection.models import PromptSettings as PromptSettings  # mirrored too
-from comfylens.collection.models import SavedLora as SavedLora
-from comfylens.extract.types import GenericKind
-from comfylens.metadata.types import Status
+from comfylens.analytics import Bucket, By, Filters, LoraKey, Scope, Side
+from comfylens.collection import MAX_TITLE, Hash, Role
+from comfylens.collection import PromptSettings as PromptSettings  # mirrored too
+from comfylens.collection import SavedLora as SavedLora
+from comfylens.metadata import MAX_TAG_LENGTH, MAX_TAGS, Status
 
 SortKey = Literal["generated_at", "rel_path", "family", "steps", "cfg"]
-Section = Literal["numeric", "categorical", "seeds", "loras", "graph", "configs"]
+Section = Literal["numeric", "categorical", "seeds", "loras", "configs"]
 ALL_SECTIONS: list[Section] = list(get_args(Section))
 
 
@@ -31,14 +27,23 @@ class ScopeInfo(BaseModel):
     analyzed: int  # files the statistics cover
 
 
+class FixSummary(BaseModel):
+    fixed: int  # files rewritten
+    first_failure: str | None  # "path: reason"
+    failed: int
+    error: str | None  # the run itself failed: nothing more was fixed
+    finished_at: float
+
+
 class IndexStatusModel(BaseModel):
-    state: Literal["idle", "scanning", "processing", "finalizing"]
+    state: Literal["idle", "fixing", "scanning", "processing", "finalizing"]
     total: int
     done: int
     errors: int
     started_at: float | None
     last_error: str | None = None  # message of the last failed run, e.g. another indexer
     last_finished_at: float | None = None
+    last_fix: FixSummary | None = None  # the last Fix run since the server started
 
 
 class Versions(BaseModel):
@@ -78,6 +83,7 @@ class DateRange(BaseModel):
 
 
 class Facets(BaseModel):
+    tags: list[FacetValue]
     families: list[FacetValue]
     base_models: list[FacetValue]
     samplers: list[FacetValue]
@@ -106,12 +112,11 @@ class ImageItem(BaseModel):
     rel_path: str
     width: int | None
     height: int | None
-    family: str | None
     generated_at: int | None
     status: Status
-    has_warnings: bool
     timestamp_suspect: bool
     saved: bool  # linked to a saved prompt in the collection
+    tags: list[str]
 
 
 class ImagesPage(BaseModel):
@@ -129,7 +134,7 @@ class IdsResponse(BaseModel):
     ids: list[int]
 
 
-TRASH_BATCH = 500  # ids per trash request; the frontend splits larger selections
+TRASH_BATCH = 500  # ids per trash or tag request; the frontend splits larger selections
 
 
 class RenameRequest(BaseModel):
@@ -146,14 +151,41 @@ class TrashRequest(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=TRASH_BATCH)
 
 
-class TrashFailure(BaseModel):
+class FileFailure(BaseModel):
     id: int
     message: str
 
 
 class TrashResponse(BaseModel):
     trashed: list[int]  # moved to the system trash, or already gone; no longer in the catalog
-    failed: list[TrashFailure]
+    failed: list[FileFailure]
+
+
+Tag = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=MAX_TAG_LENGTH,
+        pattern=r"^[^\x00-\x1f\x7f]+$",
+    ),
+]
+
+
+class TagRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=TRASH_BATCH)
+    add: list[Tag] = Field([], max_length=MAX_TAGS)
+    remove: list[str] = Field([], max_length=MAX_TAGS)  # any tag a file holds, even a long one
+
+
+class TaggedImage(BaseModel):
+    id: int
+    tags: list[str]  # after the edit, sorted
+
+
+class TagResponse(BaseModel):
+    tagged: list[TaggedImage]  # every file that did not fail, changed or not
+    failed: list[FileFailure]
 
 
 class DetailFile(BaseModel):
@@ -171,6 +203,7 @@ class DetailFile(BaseModel):
     timestamp_suspect: bool
     status: Status
     error: str | None
+    tags: list[str]
 
 
 class DetailGeneration(BaseModel):
@@ -341,23 +374,6 @@ class LoraRow(BaseModel):
     steps: list[IntCount] | None  # base_name grouping only
 
 
-class LoraNode(BaseModel):
-    name: str
-    images: int
-    median: float | None  # median strength_model over the LoRA's uses
-
-
-class LoraLink(BaseModel):
-    source: str
-    target: str
-    images: int  # images that use both LoRAs
-
-
-class LoraGraph(BaseModel):
-    nodes: list[LoraNode]  # top_n most-used LoRAs
-    links: list[LoraLink]  # strongest co-occurrences, capped
-
-
 class ConfigRow(BaseModel):
     key: str
     count: int
@@ -374,7 +390,6 @@ class FamilyStats(BaseModel):
     categorical: dict[str, Categorical] | None = None
     seeds: SeedStats | None = None
     loras: list[LoraRow] | None = None
-    graph: LoraGraph | None = None
     configs: list[ConfigRow] | None = None
 
 
@@ -504,39 +519,6 @@ class DistinctiveResponse(BaseModel):
     scope: ScopeInfo  # of the selection
     side: Side
     groups: list[DistinctiveGroup]  # families present in the selection, largest first
-
-
-class NodeInputKey(BaseModel):
-    class_type: str
-    input_name: str
-    kind: GenericKind
-    files: int
-
-
-class NodeKeysResponse(BaseModel):
-    scope: ScopeInfo
-    keys: list[NodeInputKey]  # most files first
-
-
-class NodeStatsRequest(Scope):
-    class_type: str
-    input_name: str
-
-
-class NodeStatsGroup(BaseModel):
-    family: str
-    files: int
-    kind: GenericKind
-    numeric: NumericStats | None = None
-    categorical: Categorical | None = None
-    n_unique: int | None = None  # strings longer than 200 characters report only this
-
-
-class NodeStatsResponse(BaseModel):
-    scope: ScopeInfo
-    class_type: str
-    input_name: str
-    groups: list[NodeStatsGroup]
 
 
 ImageRole = Role

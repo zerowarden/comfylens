@@ -80,6 +80,142 @@ function Tooltip({ day, left, top, flip }: { day: Day; left: number; top: number
   );
 }
 
+/** Square cells, shrunk when the weeks would overflow the strip; gaps and rounding only where
+ * the cells are big enough to show them. */
+function cellGeometry(width: number, weeks: number) {
+  const gridWidth = Math.max(0, width - LEFT - 12);
+  const pitch = weeks > 0 ? Math.min(MAX_PITCH, gridWidth / weeks) : 0;
+  return { gridWidth, pitch, size: Math.max(1, pitch - cellGap(pitch)), round: pitch >= 6 ? 2 : 0 };
+}
+
+function cellGap(pitch: number): number {
+  if (pitch >= 6) return 2;
+  return pitch >= 3 ? 1 : 0;
+}
+
+type Geometry = ReturnType<typeof cellGeometry>;
+
+/** Month labels left to right, skipping any that would overlap the previous one or fall past
+ * the grid. */
+function placeLabels(calendar: Calendar, { pitch, gridWidth }: Geometry) {
+  return monthLabels(calendar).reduce<{ x: number; label: string }[]>((out, { col, label }) => {
+    const x = LEFT + col * pitch;
+    const last = out.at(-1);
+    const free = last ? last.x + last.label.length * 5.5 + 6 : 0; // ~ width of 10px text
+    return x < free || x > LEFT + gridWidth ? out : [...out, { x, label }];
+  }, []);
+}
+
+/** The grid cell under a pointer, which may lie outside the grid. */
+function pointerCell(e: PointerEvent<SVGSVGElement>, pitch: number) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  return {
+    col: Math.floor((e.clientX - rect.left - LEFT) / pitch),
+    row: Math.floor((e.clientY - rect.top - TOP) / pitch),
+  };
+}
+
+const clampTo = (value: number, max: number) => Math.min(max, Math.max(0, value));
+
+/** The day under the pointer; `clamp` snaps points outside the grid to the nearest day. */
+function dayUnder(
+  calendar: Calendar,
+  { col, row }: { col: number; row: number },
+  clamp: boolean,
+): Day | undefined {
+  if (clamp) return nearestDay(calendar, clampTo(col, calendar.weeks - 1), clampTo(row, 6));
+  const inside = col >= 0 && col < calendar.weeks && row >= 0 && row <= 6;
+  return inside ? dayAt(calendar, col, row) : undefined;
+}
+
+interface CellProps {
+  day: Day;
+  geometry: Geometry;
+  level: number;
+  dimmed: boolean;
+  hatch: string;
+}
+
+/** A day's square: its heat, hatched when a timestamp is suspect, outlined when selected. */
+function DayCell({ day, geometry: { pitch, size, round }, level, dimmed, hatch }: CellProps) {
+  const x = LEFT + day.col * pitch;
+  const y = TOP + day.row * pitch;
+  return (
+    <g opacity={dimmed ? 0.25 : 1}>
+      <rect x={x} y={y} width={size} height={size} rx={round} className={LEVELS[level]?.fill} />
+      {day.suspect > 0 && (
+        <rect x={x} y={y} width={size} height={size} rx={round} fill={`url(#${hatch})`} />
+      )}
+      {day.selected > 0 && (
+        <rect
+          x={x + 0.75}
+          y={y + 0.75}
+          width={Math.max(0, size - 1.5)}
+          height={size - 1.5}
+          rx={round}
+          fill="none"
+          strokeWidth={1.5}
+          className="stroke-fg"
+        />
+      )}
+    </g>
+  );
+}
+
+function WeekdayLabels({ geometry: { pitch, size } }: { geometry: Geometry }) {
+  if (pitch < 9) return null;
+  return WEEKDAYS.map(([row, label]) => (
+    <text
+      key={row}
+      x={LEFT - 6}
+      y={TOP + row * pitch + size / 2}
+      fontSize={9}
+      textAnchor="end"
+      dominantBaseline="middle"
+      className="fill-muted"
+    >
+      {label}
+    </text>
+  ));
+}
+
+function HoverOutline({ day, geometry: { pitch, size, round } }: { day: Day; geometry: Geometry }) {
+  return (
+    <rect
+      x={LEFT + day.col * pitch - 0.5}
+      y={TOP + day.row * pitch - 0.5}
+      width={size + 1}
+      height={size + 1}
+      rx={round}
+      fill="none"
+      strokeWidth={1}
+      className="pointer-events-none stroke-muted"
+    />
+  );
+}
+
+/** The tooltip beside a day; it flips to the left near the right edge. */
+function DayTooltip({ day, pitch, width }: { day: Day; pitch: number; width: number }) {
+  const x = LEFT + day.col * pitch;
+  const flip = x + pitch + 8 + TOOLTIP > width;
+  return (
+    <Tooltip
+      day={day}
+      left={flip ? x - 8 : x + pitch + 8}
+      top={TOP + day.row * pitch - 4}
+      flip={flip}
+    />
+  );
+}
+
+function RangeLabel({ from, to }: { from: string | null; to: string | null }) {
+  return (
+    <div className="pointer-events-none absolute top-0.5 right-3 bg-canvas px-1 text-xs text-muted tabular-nums">
+      {from ?? "…"} – {to ?? "…"}
+    </div>
+  );
+}
+
 function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
   const dateFrom = useFilters((s) => s.filters.date_from);
   const dateTo = useFilters((s) => s.filters.date_to);
@@ -88,53 +224,24 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
   const [hover, setHover] = useState<Day | null>(null);
   const hatch = useId().replace(/:/g, "");
 
-  const { weeks, thresholds } = calendar;
-  const gridWidth = Math.max(0, width - LEFT - 12);
-  // Square cells, shrunk when the weeks would overflow the strip.
-  const pitch = weeks > 0 ? Math.min(MAX_PITCH, gridWidth / weeks) : 0;
-  const gap = pitch >= 6 ? 2 : pitch >= 3 ? 1 : 0;
-  const size = Math.max(1, pitch - gap);
-  const round = pitch >= 6 ? 2 : 0;
-  const range: [string | null, string | null] = drag ? ordered(drag.a, drag.b) : [dateFrom, dateTo];
-  const [from, to] = range;
+  const geometry = useMemo(() => cellGeometry(width, calendar.weeks), [width, calendar.weeks]);
+  const { pitch, size, round } = geometry;
+  const [from, to] = drag ? ordered(drag.a, drag.b) : [dateFrom, dateTo];
   const filtered = from !== null || to !== null;
 
   const cells = useMemo(
     () =>
-      calendar.days.map((day) => {
-        const x = LEFT + day.col * pitch;
-        const y = TOP + day.row * pitch;
-        const w = size;
-        const h = size;
-        return (
-          <g key={day.date} opacity={filtered && !inRange(day.date, from, to) ? 0.25 : 1}>
-            <rect
-              x={x}
-              y={y}
-              width={w}
-              height={h}
-              rx={round}
-              className={LEVELS[level(day.total, thresholds)]?.fill}
-            />
-            {day.suspect > 0 && (
-              <rect x={x} y={y} width={w} height={h} rx={round} fill={`url(#${hatch})`} />
-            )}
-            {day.selected > 0 && (
-              <rect
-                x={x + 0.75}
-                y={y + 0.75}
-                width={Math.max(0, w - 1.5)}
-                height={h - 1.5}
-                rx={round}
-                fill="none"
-                strokeWidth={1.5}
-                className="stroke-fg"
-              />
-            )}
-          </g>
-        );
-      }),
-    [calendar, pitch, size, round, thresholds, filtered, from, to, hatch],
+      calendar.days.map((day) => (
+        <DayCell
+          key={day.date}
+          day={day}
+          geometry={geometry}
+          level={level(day.total, calendar.thresholds)}
+          dimmed={filtered && !inRange(day.date, from, to)}
+          hatch={hatch}
+        />
+      )),
+    [calendar, geometry, filtered, from, to, hatch],
   );
 
   // Days outside the data that complete its first and last month: outlined, not filled.
@@ -156,36 +263,10 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
     [calendar, pitch, size, round],
   );
 
-  const labels = useMemo(() => {
-    const out: { x: number; label: string }[] = [];
-    let next = 0;
-    for (const { col, label } of monthLabels(calendar)) {
-      const x = LEFT + col * pitch;
-      if (x < next || x > LEFT + gridWidth) continue;
-      out.push({ x, label });
-      next = x + label.length * 5.5 + 6; // approximate width of 10px text
-    }
-    return out;
-  }, [calendar, pitch, gridWidth]);
-
-  /** The cell under the pointer; `clamp` snaps points outside the grid to the nearest day. */
-  const dayFromPointer = (e: PointerEvent<SVGSVGElement>, clamp: boolean): Day | undefined => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const col = Math.floor((e.clientX - rect.left - LEFT) / pitch);
-    const row = Math.floor((e.clientY - rect.top - TOP) / pitch);
-    if (clamp)
-      return nearestDay(
-        calendar,
-        Math.min(weeks - 1, Math.max(0, col)),
-        Math.min(6, Math.max(0, row)),
-      );
-    if (col < 0 || col >= weeks || row < 0 || row > 6) return undefined;
-    return dayAt(calendar, col, row);
-  };
+  const labels = useMemo(() => placeLabels(calendar, geometry), [calendar, geometry]);
 
   const onPointerDown = (e: PointerEvent<SVGSVGElement>) => {
-    if (e.button !== 0) return;
-    const day = dayFromPointer(e, false);
+    const day = e.button === 0 ? dayUnder(calendar, pointerCell(e, pitch), false) : undefined;
     if (!day) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -193,13 +274,9 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
     setDrag({ a: day.date, b: day.date });
   };
   const onPointerMove = (e: PointerEvent<SVGSVGElement>) => {
-    if (drag) {
-      const day = dayFromPointer(e, true);
-      if (day && day.date !== drag.b) setDrag({ ...drag, b: day.date });
-    } else {
-      const day = dayFromPointer(e, false) ?? null;
-      if (day !== hover) setHover(day);
-    }
+    const day = dayUnder(calendar, pointerCell(e, pitch), drag !== null);
+    if (!drag) setHover(day ?? null);
+    else if (day && day.date !== drag.b) setDrag({ ...drag, b: day.date });
   };
   const onPointerUp = () => {
     if (!drag) return;
@@ -208,9 +285,6 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
     update((f) => ({ ...f, date_from: lo, date_to: hi }));
   };
 
-  const hoverX = hover ? LEFT + hover.col * pitch : 0;
-  const hoverY = hover ? TOP + hover.row * pitch : 0;
-  const flip = hoverX + pitch + 8 + TOOLTIP > width;
   return (
     <>
       <svg
@@ -245,58 +319,29 @@ function Heatmap({ calendar, width }: { calendar: Calendar; width: number }) {
             {label}
           </text>
         ))}
-        {pitch >= 9 &&
-          WEEKDAYS.map(([row, label]) => (
-            <text
-              key={row}
-              x={LEFT - 6}
-              y={TOP + row * pitch + size / 2}
-              fontSize={9}
-              textAnchor="end"
-              dominantBaseline="middle"
-              className="fill-muted"
-            >
-              {label}
-            </text>
-          ))}
+        <WeekdayLabels geometry={geometry} />
         <rect
           x={LEFT}
           y={TOP}
-          width={weeks * pitch}
+          width={calendar.weeks * pitch}
           height={7 * pitch}
           fill="transparent"
           className="cursor-pointer"
         />
         <g className="pointer-events-none">{padding}</g>
         <g className="cursor-pointer">{cells}</g>
-        {hover && (
-          <rect
-            x={hoverX - 0.5}
-            y={hoverY - 0.5}
-            width={size + 1}
-            height={size + 1}
-            rx={round}
-            fill="none"
-            strokeWidth={1}
-            className="pointer-events-none stroke-muted"
-          />
-        )}
+        {hover && <HoverOutline day={hover} geometry={geometry} />}
       </svg>
-      {hover && !drag && (
-        <Tooltip
-          day={hover}
-          left={flip ? hoverX - 8 : hoverX + pitch + 8}
-          top={hoverY - 4}
-          flip={flip}
-        />
-      )}
-      {filtered && (
-        <div className="pointer-events-none absolute top-0.5 right-3 bg-canvas px-1 text-xs text-muted tabular-nums">
-          {from ?? "…"} – {to ?? "…"}
-        </div>
-      )}
+      {hover && !drag && <DayTooltip day={hover} pitch={pitch} width={width} />}
+      {filtered && <RangeLabel from={from} to={to} />}
     </>
   );
+}
+
+/** Why there is no heatmap to show. */
+function timelineNote(error: Error | null, calendar: Calendar | null): string {
+  if (error) return error.message;
+  return calendar ? "No dated images" : "Loading timeline…";
 }
 
 export default function Timeline() {
@@ -322,7 +367,7 @@ export default function Timeline() {
         <Heatmap calendar={calendar} width={width} />
       ) : (
         <div className="flex h-full items-center justify-center text-muted">
-          {query.isError ? query.error.message : calendar ? "No dated images" : "Loading timeline…"}
+          {timelineNote(query.error, calendar)}
         </div>
       )}
     </div>

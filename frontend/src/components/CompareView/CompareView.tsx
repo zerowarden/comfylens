@@ -156,18 +156,14 @@ function Segments({ segments }: { segments: Segment[] }) {
     <>
       {segments.map((s, i) =>
         s.kind === "removed" ? (
-          <del
-            key={i}
-            title="Only in A"
-            className="rounded-sm bg-danger/20 text-danger decoration-2"
-          >
+          <del key={i} title="Only in A" className="rounded bg-danger/20 text-danger decoration-2">
             {s.text}
           </del>
         ) : s.kind === "added" ? (
           <ins
             key={i}
             title="Only in B"
-            className="rounded-sm bg-success/20 text-success underline decoration-2 underline-offset-2"
+            className="rounded bg-success/20 text-success underline decoration-2 underline-offset-2"
           >
             {s.text}
           </ins>
@@ -189,8 +185,8 @@ function PromptText({ text, segments }: { text: string | null; segments: Segment
 function PromptDiff({ label, a, b }: { label: string; a: string | null; b: string | null }) {
   const diff = useMemo(() => (a !== null && b !== null ? wordDiff(a, b) : null), [a, b]);
   if (a === null && b === null) return null;
-  const changed = diff ? diff.ops.some((op) => op.kind !== "same") : true;
-  const box = "rounded bg-subtle p-2 font-sans break-words whitespace-pre-wrap";
+  const texts = { a, b };
+  const changed = !diff || diff.ops.some((op) => op.kind !== "same");
   return (
     <section>
       <h3 className="mb-1 text-xs font-semibold text-muted">
@@ -202,20 +198,25 @@ function PromptDiff({ label, a, b }: { label: string; a: string | null; b: strin
         </div>
       )}
       <div className="grid grid-cols-2 gap-3 text-xs">
-        <pre className={box}>
-          <PromptText text={a} segments={diff ? side(diff, "a") : null} />
-        </pre>
-        <pre className={box}>
-          <PromptText text={b} segments={diff ? side(diff, "b") : null} />
-        </pre>
+        {(["a", "b"] as const).map((which) => (
+          <pre
+            key={which}
+            className="rounded bg-subtle p-2 font-sans break-words whitespace-pre-wrap"
+          >
+            <PromptText text={texts[which]} segments={diff && side(diff, which)} />
+          </pre>
+        ))}
       </div>
     </section>
   );
 }
 
+const PROMPTS = [
+  ["Positive prompt", "positive_prompt"],
+  ["Negative prompt", "negative_prompt"],
+] as const;
+
 function Comparison({ a, b, onlyDiff }: { a: ImageDetail; b: ImageDetail; onlyDiff: boolean }) {
-  const ga = a.generation;
-  const gb = b.generation;
   return (
     <div className="space-y-4 p-3">
       <Settings a={a} b={b} onlyDiff={onlyDiff} />
@@ -225,16 +226,14 @@ function Comparison({ a, b, onlyDiff }: { a: ImageDetail; b: ImageDetail; onlyDi
         <ins className="underline decoration-2 underline-offset-2">underlined</ins> only in B.
         Whitespace changes are ignored.
       </div>
-      <PromptDiff
-        label="Positive prompt"
-        a={ga?.positive_prompt ?? null}
-        b={gb?.positive_prompt ?? null}
-      />
-      <PromptDiff
-        label="Negative prompt"
-        a={ga?.negative_prompt ?? null}
-        b={gb?.negative_prompt ?? null}
-      />
+      {PROMPTS.map(([label, field]) => (
+        <PromptDiff
+          key={field}
+          label={label}
+          a={a.generation?.[field] ?? null}
+          b={b.generation?.[field] ?? null}
+        />
+      ))}
     </div>
   );
 }

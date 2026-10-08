@@ -16,10 +16,8 @@ from comfylens.collection.a1111 import parse_parameters
 from comfylens.collection.models import PROMPT_SETTING_KEYS, OriginalFormat, saved_lora
 from comfylens.collection.store import CollectionStore
 from comfylens.config import Config
-from comfylens.extract.normalize import prompt_ws
-from comfylens.extract.pipeline import analyze
-from comfylens.extract.types import Extraction
-from comfylens.metadata.jpeg import decode_user_comment
+from comfylens.extract import Extraction, analyze, prompt_ws
+from comfylens.metadata import decode_user_comment
 from comfylens.paths import thumb_path, thumbs_dir
 from comfylens.thumbs import make_thumbnail
 

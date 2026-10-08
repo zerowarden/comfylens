@@ -1,4 +1,6 @@
-import type { IndexStatusModel } from "../api/types";
+import type { FixSummary, IndexStatusModel } from "../api/types";
+import type { Notice } from "../state/fileActions";
+import { fmtInt } from "./format";
 
 /**
  * How often to poll GET /api/index/status: every second while a run is in progress. While idle,
@@ -21,4 +23,17 @@ export function runLanded(
   if (!previous || !next) return false;
   if (previous.state !== "idle" && next.state === "idle") return true;
   return next.last_finished_at !== null && next.last_finished_at !== previous.last_finished_at;
+}
+
+const images = (n: number) => (n === 1 ? "1 image" : `${fmtInt(n)} images`);
+
+/** What a finished Fix run reports in the notice bar. */
+export function fixNotice(fix: FixSummary): Notice {
+  if (fix.error) return { text: `Fix failed: ${fix.error}`, tone: "error" };
+  const fixed = fix.fixed > 0 ? `Fixed ${images(fix.fixed)}` : "Nothing to fix";
+  if (fix.failed === 0) return { text: fixed, tone: "info" };
+  return {
+    text: `${fixed}; ${images(fix.failed)} could not be fixed: ${fix.first_failure ?? ""}`,
+    tone: "error",
+  };
 }

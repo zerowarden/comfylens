@@ -13,6 +13,7 @@ from comfylens.db import read as db_read
 from comfylens.extract.types import LoraUse, SamplerStage
 from comfylens.index import write as index_write
 from comfylens.metadata import types as metadata_types
+from comfylens.metadata.xmp import MAX_TAG_LENGTH
 
 ROOT = Path(__file__).parents[1]
 TYPES_TS = ROOT / "frontend" / "src" / "api" / "types.ts"
@@ -80,12 +81,12 @@ def test_mirrored_literal_unions_match():
     assert {name: ts[name] for name in mirror} == {name: backend[name] for name in mirror}
 
 
-def test_trash_batch_matches_the_frontend():
-    # A smaller server limit would turn every large trash from the UI into 400 errors.
+def test_limits_match_the_frontend():
+    # A smaller server limit would turn large edits or long tags from the UI into 400 errors.
     files_ts = (ROOT / "frontend/src/lib/files.ts").read_text("utf-8")
-    match = re.search(r"export const TRASH_BATCH = (\d+);", files_ts)
-    assert match is not None
-    assert int(match.group(1)) == schemas.TRASH_BATCH
+    for name, value in [("TRASH_BATCH", schemas.TRASH_BATCH), ("MAX_TAG_LENGTH", MAX_TAG_LENGTH)]:
+        match = re.search(rf"export const {name} = (\d+);", files_ts)
+        assert match is not None and int(match.group(1)) == value, name
 
 
 def _table_columns(schema: str) -> dict[str, set[str]]:
@@ -153,7 +154,6 @@ def test_prompt_settings_shapes_match_the_shared_model():
         latent_source=None,
         batch_size=None,
         input_images=[],
-        generic_inputs=[],
         lora_stack_key="(none)",
         config_key="",
         generation_key="",

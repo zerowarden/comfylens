@@ -41,6 +41,8 @@ GENERATIONS_SCHEMA: dict[str, Any] = {
     "generation_key": pl.String,
 }
 
+TAGS_SCHEMA: dict[str, Any] = {"file_id": pl.Int64, "tags": pl.List(pl.String)}
+
 LORAS_SCHEMA: dict[str, Any] = {
     "file_id": pl.Int64,
     "name": pl.String,
@@ -66,6 +68,12 @@ def files_frame(conn: sqlite3.Connection) -> pl.DataFrame:
 def generations_frame(conn: sqlite3.Connection) -> pl.DataFrame:
     """Every scalar generations column; prompts are loaded separately."""
     return _frame(conn, "generations", GENERATIONS_SCHEMA)
+
+
+def tags_frame(conn: sqlite3.Connection) -> pl.DataFrame:
+    """Each tagged file's tags, sorted."""
+    tags = _frame(conn, "tags", {"file_id": pl.Int64, "tag": pl.String}, "ORDER BY file_id, tag")
+    return tags.group_by("file_id", maintain_order=True).agg(pl.col("tag").alias("tags"))
 
 
 def loras_frame(conn: sqlite3.Connection) -> pl.DataFrame:

@@ -23,30 +23,35 @@ function barLabel(bar: { x0: number; x1: number }, kind: Histogram["kind"]): str
   return kind === "discrete" ? fmtNum(bar.x0) : `${fmtNum(bar.x0)}–${fmtNum(bar.x1)}`;
 }
 
+const PLOT = { width: 96, height: 30, pad: 5, axis: 22 };
+const QUANTILES = ["min", "p25", "median", "p75", "max"] as const;
+
+/** "min 1, p25 2, median 3, p75 4, max 5", leaving out the quantiles that are unknown. */
+const rangeTitle = (stats: NumericStats) =>
+  QUANTILES.filter((q) => stats[q] !== null)
+    .map((q) => `${q} ${fmtNum(stats[q])}`)
+    .join(", ");
+
+/** Where a value sits on the plot; a single-valued range sits in the middle. */
+const scale = (min: number, max: number) => (v: number) =>
+  max === min ? PLOT.width / 2 : PLOT.pad + ((v - min) / (max - min)) * (PLOT.width - 2 * PLOT.pad);
+
+/** Keep the median's label inside the plot near either end. */
+function labelAnchor(x: number): "start" | "middle" | "end" {
+  if (x < 14) return "start";
+  return x > PLOT.width - 14 ? "end" : "middle";
+}
+
 /**
  * Min to max as an axis, the interquartile range as a shaded box and the median as a marker with
  * its value above, on the field's own scale. Colours are the range tokens in theme.css.
  */
-export function RangePlot({ stats }: { stats: NumericStats }) {
+function RangePlot({ stats }: { stats: NumericStats }) {
   const { min, p25, median, p75, max } = stats;
   if (min === null || max === null) return null;
-  const w = 96;
-  const h = 30;
-  const pad = 5;
-  const axis = 22;
-  const x = (v: number) => (max === min ? w / 2 : pad + ((v - min) / (max - min)) * (w - 2 * pad));
-  const title = [
-    `min ${fmtNum(min)}`,
-    p25 !== null && `p25 ${fmtNum(p25)}`,
-    median !== null && `median ${fmtNum(median)}`,
-    p75 !== null && `p75 ${fmtNum(p75)}`,
-    `max ${fmtNum(max)}`,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const xm = median === null ? null : x(median);
-  // Keep the median's label inside the plot near either end.
-  const anchor = xm === null ? "middle" : xm < 14 ? "start" : xm > w - 14 ? "end" : "middle";
+  const x = scale(min, max);
+  const { width: w, height: h, pad, axis } = PLOT;
+  const title = rangeTitle(stats);
   return (
     <svg width={w} height={h} role="img" aria-label={title} className="block">
       <title>{title}</title>
@@ -62,22 +67,27 @@ export function RangePlot({ stats }: { stats: NumericStats }) {
       <line x1={pad} x2={w - pad} y1={axis} y2={axis} className="stroke-range-axis" />
       <line x1={pad} x2={pad} y1={axis - 3} y2={axis + 3} className="stroke-range-axis" />
       <line x1={w - pad} x2={w - pad} y1={axis - 3} y2={axis + 3} className="stroke-range-axis" />
-      {xm !== null && median !== null && (
-        <>
-          <polygon
-            points={`${xm},${axis - 7} ${xm - 4},${axis + 1} ${xm + 4},${axis + 1}`}
-            className="fill-range-median"
-          />
-          <text x={xm} y={8} textAnchor={anchor} className="fill-fg text-[9px] tabular-nums">
-            {fmtNum(median)}
-          </text>
-        </>
-      )}
+      {median !== null && <MedianMarker x={x(median)} median={median} />}
     </svg>
   );
 }
 
-export function HistogramChart({ histogram }: { histogram: Histogram }) {
+function MedianMarker({ x, median }: { x: number; median: number }) {
+  const { axis } = PLOT;
+  return (
+    <>
+      <polygon
+        points={`${x},${axis - 7} ${x - 4},${axis + 1} ${x + 4},${axis + 1}`}
+        className="fill-range-median"
+      />
+      <text x={x} y={8} textAnchor={labelAnchor(x)} className="fill-fg text-[9px] tabular-nums">
+        {fmtNum(median)}
+      </text>
+    </>
+  );
+}
+
+function HistogramChart({ histogram }: { histogram: Histogram }) {
   const theme = useUi((s) => s.theme);
   const option = useMemo<EChartsOption>(() => {
     const colors = chartColors();
@@ -102,6 +112,38 @@ export function HistogramChart({ histogram }: { histogram: Histogram }) {
     };
   }, [histogram, theme]);
   return <Chart option={option} className="h-44 w-full" />;
+}
+
+/** Numeric fields: the summary table, or plain values for a single selected image. */
+export function NumericField({
+  name,
+  stats,
+  single = false,
+}: {
+  name: string;
+  stats: NumericStats;
+  single?: boolean;
+}) {
+  const fields = { [name]: stats };
+  return single ? <NumericValues stats={fields} /> : <NumericTable stats={fields} />;
+}
+
+/** The value of each numeric field in scope, without summary statistics: the single-image view. */
+export function NumericValues({ stats }: { stats: Record<string, NumericStats> }) {
+  const rows = Object.entries(stats).filter(([, s]) => s.n > 0);
+  if (rows.length === 0) return null;
+  return (
+    <table className="w-full text-xs">
+      <tbody>
+        {rows.map(([name, s]) => (
+          <tr key={name}>
+            <td className={`${td} w-32 text-muted`}>{name}</td>
+            <td className={`${td} tabular-nums`}>{fmtNum(s.median)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 /** Clicking a row shows its histogram. */

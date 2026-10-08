@@ -2,13 +2,14 @@
 
 import re
 from collections.abc import Sequence
+from typing import Any
 
 from comfylens.extract.model_chain import ModelChain
 from comfylens.extract.normalize import lora_base_step, model_stem
 from comfylens.extract.registry import REGISTRY, Role, role_of
 from comfylens.extract.types import LoraUse
 from comfylens.extract.values import as_float, read_float, read_str
-from comfylens.graph.model import Graph, Node
+from comfylens.graph import Graph, Node
 from comfylens.warn import Code, Warn
 
 
@@ -49,28 +50,28 @@ type _Raw = tuple[str, str, float | None, float | None, bool]
 def _uses(
     graph: Graph, node: Node, step_suffix: re.Pattern[str], stage_index: int | None
 ) -> list[LoraUse]:
-    uses = []
-    for entry, name_raw, strength_model, strength_clip, enabled in _read(graph, node):
-        name = model_stem(name_raw)
-        base_name, step = lora_base_step(name, step_suffix)
-        uses.append(
-            LoraUse(
-                position=None,
-                stage_index=stage_index,
-                node_id=node.id,
-                entry=entry,
-                class_type=node.class_type,
-                name_raw=name_raw,
-                name=name,
-                base_name=base_name,
-                step=step,
-                strength_model=strength_model,
-                strength_clip=strength_clip,
-                enabled=enabled,
-                reachable=stage_index is not None,
-            )
-        )
-    return uses
+    return [_use(node, raw, step_suffix, stage_index) for raw in _read(graph, node)]
+
+
+def _use(node: Node, raw: _Raw, step_suffix: re.Pattern[str], stage_index: int | None) -> LoraUse:
+    entry, name_raw, strength_model, strength_clip, enabled = raw
+    name = model_stem(name_raw)
+    base_name, step = lora_base_step(name, step_suffix)
+    return LoraUse(
+        position=None,
+        stage_index=stage_index,
+        node_id=node.id,
+        entry=entry,
+        class_type=node.class_type,
+        name_raw=name_raw,
+        name=name,
+        base_name=base_name,
+        step=step,
+        strength_model=strength_model,
+        strength_clip=strength_clip,
+        enabled=enabled,
+        reachable=stage_index is not None,
+    )
 
 
 def _read(graph: Graph, node: Node) -> list[_Raw]:
@@ -83,18 +84,20 @@ def _read(graph: Graph, node: Node) -> list[_Raw]:
         strength_clip = read_float(graph, node, entry, "strength_clip")
         return [("", name, strength_model, strength_clip, True)]
 
-    found: list[_Raw] = []
-    for key, value in node.inputs.items():  # widget order is chain order within the node
-        if not _is_power_entry(key, value):
-            continue
-        strength = as_float(value["strength"])
-        # strengthTwo exists only when rgthree shows separate model and clip strengths.
-        clip = as_float(value["strengthTwo"]) if "strengthTwo" in value else strength
-        found.append((key, value["lora"], strength, clip, bool(value["on"])))
-    return found
+    # Widget order is chain order within the node.
+    return [
+        _power_raw(key, value) for key, value in node.inputs.items() if is_power_entry(key, value)
+    ]
 
 
-def _is_power_entry(key: str, value: object) -> bool:
+def _power_raw(key: str, value: dict[str, Any]) -> _Raw:
+    strength = as_float(value["strength"])
+    # strengthTwo exists only when rgthree shows separate model and clip strengths.
+    clip = as_float(value["strengthTwo"]) if "strengthTwo" in value else strength
+    return key, value["lora"], strength, clip, bool(value["on"])
+
+
+def is_power_entry(key: str, value: object) -> bool:
     # rgthree matches keys case-insensitively and requires on, lora and strength.
     return (
         key.upper().startswith("LORA_")

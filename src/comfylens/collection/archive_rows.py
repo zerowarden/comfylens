@@ -9,7 +9,7 @@ from typing import Any
 
 from comfylens.collection.prompts import PromptsMixin
 from comfylens.collection.store_base import PromptData, _check_hashes, _now
-from comfylens.db.connection import rows, transaction
+from comfylens.db import rows, transaction
 
 
 class ArchiveRowsMixin(PromptsMixin):

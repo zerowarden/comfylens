@@ -1,5 +1,5 @@
 """Catalog writes. Called from the indexer thread, inside transactions; file_ops reuses
-`delete_files`.
+`delete_files` and `replace_tags`.
 
 Each INSERT derives its column list from the named tuple below, so reordering a value tuple
 and its columns at the same time is impossible. test_schema_sync checks those tuples against
@@ -12,8 +12,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import fields
 from typing import Any
 
-from comfylens.db.connection import chunks, placeholders
-from comfylens.extract.types import Extraction, LoraUse, SamplerStage
+from comfylens.db import chunks, placeholders
+from comfylens.extract import Extraction, LoraUse, SamplerStage
 from comfylens.index.worker import Extracted, ParsedFile
 from comfylens.warn import EXTRACTION_CODES, Warn
 
@@ -24,7 +24,6 @@ _EXTRACTION_TABLES = (
     "loras",
     "input_images",
     "nodes",
-    "node_inputs",
 )
 _EXTRACTION_CODES = tuple(sorted(EXTRACTION_CODES))
 
@@ -162,6 +161,7 @@ def write_parsed(conn: sqlite3.Connection, file_id: int, p: ParsedFile) -> None:
     """Replace every child row of a fully processed file."""
     for table in ("raw_metadata", "warnings", *_EXTRACTION_TABLES):
         conn.execute(f"DELETE FROM {table} WHERE file_id = ?", (file_id,))
+    replace_tags(conn, file_id, p.tags)
     if p.texts:
         others = {k: v for k, v in p.texts.items() if k not in (p.prompt_key, p.workflow_key)}
         conn.execute(
@@ -192,6 +192,11 @@ def write_reextracted(conn: sqlite3.Connection, file_id: int, e: Extracted) -> N
         (file_id, *_EXTRACTION_CODES),
     )
     _insert_extracted(conn, file_id, e)
+
+
+def replace_tags(conn: sqlite3.Connection, file_id: int, tags: Iterable[str]) -> None:
+    conn.execute("DELETE FROM tags WHERE file_id = ?", (file_id,))
+    conn.executemany("INSERT INTO tags (file_id, tag) VALUES (?, ?)", [(file_id, t) for t in tags])
 
 
 def delete_files(conn: sqlite3.Connection, ids: Sequence[int]) -> None:
@@ -234,14 +239,6 @@ def _insert_extracted(conn: sqlite3.Connection, file_id: int, e: Extracted) -> N
         "INSERT INTO input_images (file_id, node_id, filename, sha256) VALUES (?, ?, ?, ?)",
         [(file_id, i.node_id, i.filename, i.sha256) for i in x.input_images],
     )
-    conn.executemany(
-        "INSERT INTO node_inputs (file_id, node_id, class_type, input_name, kind, value_num,"
-        " value_text, reachable) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (file_id, g.node_id, g.class_type, g.input_name, g.kind, *_value(g.value), g.reachable)
-            for g in x.generic_inputs
-        ],
-    )
 
 
 def _stage_values(s: SamplerStage) -> tuple[Any, ...]:
@@ -281,13 +278,3 @@ def _insert_generation(conn: sqlite3.Connection, file_id: int, x: Extraction) ->
         "generation_key": x.generation_key,
     }
     conn.execute(_GENERATION_INSERT, (file_id, *(values[c] for c in GENERATIONS_COLUMNS)))
-
-
-def _value(value: Any) -> tuple[float | None, str | None]:
-    """(value_num, value_text) for a generic input: bools and numbers as REAL, else text."""
-    if isinstance(value, bool | int | float):
-        try:
-            return float(value), None
-        except OverflowError:  # an integer beyond float range
-            return None, str(value)
-    return None, value

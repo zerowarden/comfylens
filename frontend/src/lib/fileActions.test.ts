@@ -2,13 +2,19 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, ApiError } from "../api/client";
-import type { IdsResponse, ImageDetail, ImagesPage, TrashResponse } from "../api/types";
+import type {
+  IdsResponse,
+  ImageDetail,
+  ImagesPage,
+  TagResponse,
+  TrashResponse,
+} from "../api/types";
 import { useFileActions } from "../state/fileActions";
 import { useFilters } from "../state/filters";
 import { useSelection } from "../state/selection";
 import { useUi } from "../state/ui";
 import { imageItem } from "../test/fixtures";
-import { exportStripped, renameImage, trashImages } from "./fileActions";
+import { exportStripped, renameImage, tagImages, trashImages } from "./fileActions";
 import { TRASH_BATCH } from "./files";
 import { orderKey } from "./images";
 
@@ -175,5 +181,57 @@ describe("renameImage", () => {
     await renameImage(client, 2, "dir/2.png", "fox.png");
     expect(useFileActions.getState().notice).toEqual({ text: "Renamed to fox.png", tone: "info" });
     expect(invalidated(["library"])).toBe(true);
+  });
+});
+
+describe("tagImages", () => {
+  const tags = (id: number) =>
+    client.getQueryData<ImagesPage>(["page", key, 0])?.items.find((i) => i.id === id)?.tags;
+
+  it("shows the new tags before the server answers", async () => {
+    client.setQueryData(["image", 2], { file: { id: 2, tags: ["owl"] } } as ImageDetail);
+    const request = pending<TagResponse>();
+    vi.spyOn(api, "tag").mockReturnValue(request.promise);
+    const done = tagImages(client, [2, 3], ["fox"], ["owl"]);
+    await vi.waitFor(() => expect(api.tag).toHaveBeenCalledWith([2, 3], ["fox"], ["owl"]));
+    expect([tags(1), tags(2), tags(3)]).toEqual([[], ["fox"], ["fox"]]);
+    expect(client.getQueryData<ImageDetail>(["image", 2])?.file.tags).toEqual(["fox"]);
+
+    request.resolve({
+      tagged: [
+        { id: 2, tags: ["fox"] },
+        { id: 3, tags: ["fox"] },
+      ],
+      failed: [],
+    });
+    await done;
+    expect(useFileActions.getState().notice).toEqual({
+      text: "Updated the tags of 2 images",
+      tone: "info",
+    });
+    expect(invalidated(["library"])).toBe(true);
+    expect(invalidated(["stats", "x"])).toBe(false);
+  });
+
+  it("reports failures and refetches everything to undo the guess", async () => {
+    vi.spyOn(api, "tag").mockResolvedValue({
+      tagged: [{ id: 4, tags: ["fox"] }],
+      failed: [{ id: 5, message: "dir/5.png: the file already holds XMP metadata" }],
+    });
+    await tagImages(client, [4, 5], ["fox"], []);
+    expect(useFileActions.getState().notice).toEqual({
+      text: "Tagged 1; 1 image could not be tagged: dir/5.png: the file already holds XMP metadata",
+      tone: "error",
+    });
+    expect(invalidated(["page", key, 0])).toBe(true);
+  });
+
+  it("sends large selections in batches and names a single image", async () => {
+    const many = Array.from({ length: TRASH_BATCH + 1 }, (_, i) => i + 100);
+    const tag = vi.spyOn(api, "tag").mockResolvedValue({ tagged: [], failed: [] });
+    await tagImages(client, many, ["fox"], []);
+    expect(tag.mock.calls.map(([batch]) => batch.length)).toEqual([TRASH_BATCH, 1]);
+    await tagImages(client, [4], ["fox"], []);
+    expect(useFileActions.getState().notice?.text).toBe("Updated the tags of 4.png");
   });
 });

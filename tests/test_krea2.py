@@ -58,7 +58,6 @@ def test_krea2_api_node(config):
     assert e.positive_prompt == "high fashion editorial close-up portrait"
     assert e.negative_prompt is None
     assert codes(e) == [(Code.NO_SAMPLER, None)]
-    assert ("model.aspect_ratio", "1:1") in {(i.input_name, i.value) for i in e.generic_inputs}
 
 
 def test_a_generator_prompt_rewritten_by_an_llm_is_flagged(config):

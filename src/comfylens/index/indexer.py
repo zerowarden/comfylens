@@ -7,16 +7,17 @@ process pool; every database write happens in the indexer thread.
 import json
 import sqlite3
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Collection, Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from time import perf_counter
-from typing import Literal
+from typing import Any, Literal
 
 from comfylens import version
 from comfylens.config import Config, resolve_workers
-from comfylens.db.connection import (
+from comfylens.db import (
     chunks,
     has_fts,
     open_catalog,
@@ -25,7 +26,7 @@ from comfylens.db.connection import (
     transaction,
 )
 from comfylens.index.lock import IndexLock
-from comfylens.index.scanner import scan
+from comfylens.index.scanner import FileStat, scan
 from comfylens.index.timestamps import Cluster, burst_clusters, generated_at
 from comfylens.index.worker import (
     Job,
@@ -46,7 +47,7 @@ from comfylens.index.write import delete_files, upsert_file, write_parsed, write
 from comfylens.paths import catalog_path, lock_path, thumb_path, thumbs_dir
 from comfylens.warn import Code
 
-State = Literal["idle", "scanning", "processing", "finalizing"]
+State = Literal["idle", "fixing", "scanning", "processing", "finalizing"]
 
 
 class UnsafeLocation(RuntimeError):
@@ -89,6 +90,35 @@ def _suspect_message(cluster: Cluster) -> str:
     )
 
 
+# Map work over items: (function a pool process runs, the same in this thread, items).
+type _Run = Callable[
+    [Callable[[Any], Any], Callable[[Any, Settings], Any], Iterable[Any]], Iterator[Any]
+]
+
+
+def _same(old: tuple[int, int, int] | None, f: FileStat, reread: Collection[str] | None) -> bool:
+    """Whether the catalog row (id, size, mtime) still describes the scanned file, which is not
+    to be re-read anyway; `reread` None re-reads every file."""
+    return (
+        old is not None
+        and reread is not None
+        and f.rel_path not in reread
+        and (old[1], old[2]) == (f.size, f.mtime_ns)
+    )
+
+
+def _with_prompt(conn: sqlite3.Connection, ids: list[int]) -> list[int]:
+    """The files among `ids` with a stored API prompt to re-extract."""
+    stored = {
+        r[0] for r in conn.execute("SELECT file_id FROM raw_metadata WHERE prompt_json IS NOT NULL")
+    }
+    return [i for i in ids if i in stored]
+
+
+def _reextract(item: tuple[int, str], settings: Settings) -> Reextracted:
+    return reextract(*item, settings)
+
+
 class Indexer:
     def __init__(
         self,
@@ -104,14 +134,17 @@ class Indexer:
         self.status = IndexStatus()
         self._on_status = on_status
 
-    def _set(self, **changes: object) -> None:
+    def set_status(self, **changes: object) -> None:
         self.status = replace(self.status, **changes)  # type: ignore[arg-type]
         if self._on_status is not None:
             self._on_status(self.status)
 
-    def run(self, *, full: bool = False, reextract_all: bool = False) -> IndexResult:
-        """Index the library. `full` re-reads every file; `reextract_all` re-extracts every
-        unchanged file from raw JSON. Raises IndexLocked when another process is indexing."""
+    def run(
+        self, *, full: bool = False, reextract_all: bool = False, reread: Collection[str] = ()
+    ) -> IndexResult:
+        """Index the library. `full` re-reads every file, `reread` the files at these paths;
+        `reextract_all` re-extracts every unchanged file from raw JSON. Raises IndexLocked when
+        another process is indexing."""
         catalog_file, thumbs = catalog_path(self.root), thumbs_dir()
         for location in (catalog_file.parent, thumbs):
             if location.resolve().is_relative_to(self.root):
@@ -120,18 +153,26 @@ class Indexer:
             catalog = open_catalog(catalog_file, self.root, self.config.config_hash)
             try:
                 return self._run(
-                    catalog.conn, thumbs, full=full, reextract_all=reextract_all or catalog.stale
+                    catalog.conn,
+                    thumbs,
+                    reread=None if full else frozenset(reread),
+                    reextract_all=reextract_all or catalog.stale,
                 )
             finally:
                 catalog.conn.close()
-                self._set(state="idle")
+                self.set_status(state="idle")
 
     def _run(
-        self, conn: sqlite3.Connection, thumbs: Path, *, full: bool, reextract_all: bool
+        self,
+        conn: sqlite3.Connection,
+        thumbs: Path,
+        *,
+        reread: Collection[str] | None,
+        reextract_all: bool,
     ) -> IndexResult:
         result = IndexResult(workers=self.workers)
         start = perf_counter()
-        self._set(state="scanning", total=0, done=0, errors=0, started_at=time.time())
+        self.set_status(state="scanning", total=0, done=0, errors=0, started_at=time.time())
 
         cfg = self.config.index
         scanned = scan(self.root, cfg.extensions, cfg.exclude_globs, cfg.follow_symlinks)
@@ -144,30 +185,15 @@ class Indexer:
         }
         on_disk = {f.rel_path for f in scanned.files}
         deleted = [file_id for rel, (file_id, _, _) in existing.items() if rel not in on_disk]
-        jobs: list[Job] = []
-        unchanged: list[int] = []
-        for f in scanned.files:
-            old = existing.get(f.rel_path)
-            if old is None:
-                result.new += 1
-            elif full or (old[1], old[2]) != (f.size, f.mtime_ns):
-                result.changed += 1
-            else:
-                unchanged.append(old[0])
-                continue
-            jobs.append(Job(f.rel_path, f.size, f.mtime_ns))
+        matched = [(f, existing.get(f.rel_path)) for f in scanned.files]
+        jobs = [
+            Job(f.rel_path, f.size, f.mtime_ns) for f, old in matched if not _same(old, f, reread)
+        ]
+        unchanged = [old[0] for f, old in matched if old is not None and _same(old, f, reread)]
+        result.new = sum(old is None for _, old in matched)
+        result.changed = len(jobs) - result.new
         result.unchanged = len(unchanged)
-
-        redo: list[int] = []
-        if reextract_all and unchanged:
-            with_prompt = {
-                r[0]
-                for r in conn.execute(
-                    "SELECT file_id FROM raw_metadata WHERE prompt_json IS NOT NULL"
-                )
-            }
-            redo = [i for i in unchanged if i in with_prompt]
-
+        redo = _with_prompt(conn, unchanged) if reextract_all else []
         restore = self._missing_thumbnails(conn, thumbs, unchanged)
 
         if deleted:
@@ -176,33 +202,14 @@ class Indexer:
             result.deleted = len(deleted)
 
         work = len(jobs) + len(redo) + len(restore)
-        self._set(state="processing", total=work)
-        settings = Settings(self.root, thumbs, self.config)
-        if self.workers > 1 and work > 1:
-            pool = ProcessPoolExecutor(self.workers, initializer=init_pool, initargs=(settings,))
-            try:
-                ahead = self.workers * 4  # chunks in flight; bounds memory for large libraries
-                self._write_parsed(
-                    conn, pool.map(pool_process_file, jobs, chunksize=16, buffersize=ahead), result
-                )
-                prompts = self._prompts(redo)
-                self._write_reextracted(
-                    conn, pool.map(pool_reextract, prompts, chunksize=16, buffersize=ahead), result
-                )
-                self._count_restored(
-                    pool.map(pool_restore_thumbnail, restore, chunksize=16, buffersize=ahead),
-                    result,
-                )
-            finally:
-                pool.shutdown(wait=True, cancel_futures=True)
-        else:
-            self._write_parsed(conn, (process_file(j, settings) for j in jobs), result)
-            self._write_reextracted(
-                conn, (reextract(i, text, settings) for i, text in self._prompts(redo)), result
-            )
-            self._count_restored((restore_thumbnail(j, settings) for j in restore), result)
+        self.set_status(state="processing", total=work)
+        with self._mapper(Settings(self.root, thumbs, self.config), work) as run:
+            self._write_parsed(conn, run(pool_process_file, process_file, jobs), result)
+            prompts = self._prompts(redo)
+            self._write_reextracted(conn, run(pool_reextract, _reextract, prompts), result)
+            self._count_restored(run(pool_restore_thumbnail, restore_thumbnail, restore), result)
 
-        self._set(state="finalizing")
+        self.set_status(state="finalizing")
         changed = bool(jobs or redo or deleted)
         with transaction(conn):
             result.clusters = self._timestamps(conn)
@@ -217,6 +224,22 @@ class Indexer:
                 set_meta(conn, "last_index_stats", json.dumps(stats))
             set_meta(conn, "timestamp_clusters", json.dumps([c.to_json() for c in result.clusters]))
         return result
+
+    @contextmanager
+    def _mapper(self, settings: Settings, work: int) -> Iterator[_Run]:
+        """How work runs: in a process pool, or in this thread for a single worker or item. The
+        pooled function reads the settings its process was started with."""
+        if self.workers <= 1 or work <= 1:
+            yield lambda _pooled, local, items: (local(item, settings) for item in items)
+            return
+        pool = ProcessPoolExecutor(self.workers, initializer=init_pool, initargs=(settings,))
+        ahead = self.workers * 4  # chunks in flight; bounds memory for large libraries
+        try:
+            yield lambda pooled, _local, items: pool.map(
+                pooled, items, chunksize=16, buffersize=ahead
+            )
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)
 
     def _batches[T](self, items: Iterable[T]) -> Iterator[list[T]]:
         batch: list[T] = []
@@ -241,7 +264,7 @@ class Indexer:
                 result.seconds_metadata += p.seconds_metadata
                 result.seconds_thumbnail += p.seconds_thumbnail
                 result.thumbnails_written += p.thumbnail_written
-            self._set(done=self.status.done + len(batch), errors=result.errors)
+            self.set_status(done=self.status.done + len(batch), errors=result.errors)
 
     def _write_reextracted(
         self, conn: sqlite3.Connection, items: Iterable[Reextracted], result: IndexResult
@@ -254,13 +277,13 @@ class Indexer:
                 result.errors += r.extracted.status == "error"
                 result.seconds_reextract += r.seconds
             result.reextracted += len(batch)
-            self._set(done=self.status.done + len(batch), errors=result.errors)
+            self.set_status(done=self.status.done + len(batch), errors=result.errors)
 
     def _count_restored(self, outcomes: Iterable[ThumbOutcome], result: IndexResult) -> None:
         for batch in self._batches(outcomes):
             result.thumbnails_written += batch.count("written")
             result.thumbnails_failed += batch.count("failed")
-            self._set(done=self.status.done + len(batch))
+            self.set_status(done=self.status.done + len(batch))
 
     def _missing_thumbnails(
         self, conn: sqlite3.Connection, thumbs: Path, unchanged: list[int]

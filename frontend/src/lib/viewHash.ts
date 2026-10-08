@@ -1,7 +1,7 @@
 /** Which top-level view is shown, kept in the URL hash: "#collection" or "#collection/12". */
 export type View = "library" | "collection";
 
-export interface ViewState {
+interface ViewState {
   view: View;
   /** The saved prompt open in the collection view. */
   promptId: number | null;

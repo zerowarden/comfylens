@@ -186,23 +186,6 @@ def test_a_lora_shared_by_stages_counts_once_in_statistics(library: Path):
     assert sorted(frame["name"].to_list()) == ["fox", "krea2_darkbrush", "qwen2.1-lenovo-ultrareal"]
 
 
-def test_lora_graph_links_loras_used_in_one_image(client: TestClient):
-    stats = client.post("/api/stats", json={"sections": ["graph"]}).json()
-    realism = next(g for g in stats["groups"] if g["family"] == "krea-2 + qwen-image-2.1")
-    assert [n["name"] for n in realism["graph"]["nodes"]] == [
-        "krea2_darkbrush",
-        "qwen2.1-lenovo-ultrareal",
-    ]
-    # The two passes use different LoRAs, but the one image uses both: one link.
-    assert realism["graph"]["links"] == [
-        {
-            "source": "krea2_darkbrush",
-            "target": "qwen2.1-lenovo-ultrareal",
-            "images": 1,
-        }
-    ]
-
-
 @pytest.fixture
 def client(library: Path, config: Config) -> Iterator[TestClient]:
     app = create_app(library, config, index_on_start=False, web_dir=None)

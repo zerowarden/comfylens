@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from comfylens.metadata.types import is_api_node
+from comfylens.metadata import is_api_node
 
 
 @dataclass(frozen=True, slots=True)

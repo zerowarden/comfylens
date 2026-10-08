@@ -5,7 +5,7 @@ import sqlite3
 import polars as pl
 
 from comfylens.api.server_base import CACHE_SIZE, _ServerBase
-from comfylens.db.connection import like_pattern
+from comfylens.db import like_pattern
 
 
 class SearchMixin(_ServerBase):

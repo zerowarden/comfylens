@@ -3,11 +3,23 @@ import threading
 import time
 from collections.abc import Iterator
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 import pytest
-from conftest import ids_by_path, png_with_text, server_of, txt2img_png, wait_for, write_file
+from conftest import (
+    API_TEXT,
+    catalog_rows,
+    ids_by_path,
+    jpeg_segment,
+    png_with_text,
+    server_of,
+    txt2img_png,
+    wait_for,
+    write_file,
+)
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from comfylens.analytics import snapshot
 from comfylens.api import server as server_module
@@ -16,6 +28,8 @@ from comfylens.api.schemas import TRASH_BATCH
 from comfylens.config import Config, build_config
 from comfylens.index.file_ops import InvalidName, new_rel_path
 from comfylens.index.indexer import Indexer
+from comfylens.metadata import read_metadata
+from comfylens.metadata.jpeg import XMP_PREFIX
 from comfylens.paths import catalog_path
 
 T0 = 1_790_000_000
@@ -283,6 +297,7 @@ def test_edits_without_a_catalog(tmp_path: Path, config: Config):
     with make_client(root, config) as c:
         assert c.post("/api/images/trash", json={"ids": [1]}).status_code == 503
         assert c.post("/api/images/1/rename", json={"name": "x.png"}).status_code == 503
+        assert c.post("/api/images/tags", json={"ids": [1], "add": ["x"]}).status_code == 503
     assert not catalog_path(root).exists()  # an edit never creates an empty catalog
 
 
@@ -296,7 +311,10 @@ def test_other_sites_cannot_edit(client: TestClient, library: Path, origin: str)
     assert r.status_code == 403 and r.json()["error"]["code"] == "cross_origin"
     r = client.post("/api/images/trash", json={"ids": [file_id]}, headers=headers)
     assert r.status_code == 403
+    r = client.post("/api/images/tags", json={"ids": [file_id], "add": ["x"]}, headers=headers)
+    assert r.status_code == 403
     assert (library / "a.png").is_file()
+    assert read_metadata((library / "a.png").read_bytes()).tags == []
 
 
 def test_the_dev_server_origin_can_edit(client: TestClient):
@@ -366,3 +384,157 @@ def test_an_edit_neither_waits_for_a_rebuild_nor_is_lost_to_it(client: TestClien
         release.set()
         rebuild.join(5)
     assert set(ids_by_path(client)) == {"x.png", "sub/c.png", "plain.png"}
+
+
+def tag(client: TestClient, ids: list[int], add=(), remove=()) -> dict:
+    r = client.post("/api/images/tags", json={"ids": ids, "add": add, "remove": remove})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def items(client: TestClient) -> dict[int, dict]:
+    return {i["id"]: i for i in client.post("/api/images/query", json={}).json()["items"]}
+
+
+def test_tag(client: TestClient, library: Path, config: Config):
+    paths = ids_by_path(client)
+    a, b = paths["a.png"], paths["b.png"]
+    (library / "a.png").chmod(0o640)
+    original = (library / "a.png").read_bytes()
+    before = (library / "a.png").stat()
+    hashes = {i: item["content_hash"] for i, item in items(client).items()}
+
+    result = tag(client, [a, b], add=[" fox ", "red fox"])
+    assert result == {
+        "tagged": [{"id": a, "tags": ["fox", "red fox"]}, {"id": b, "tags": ["fox", "red fox"]}],
+        "failed": [],
+    }
+    # In the file, which keeps its modification time (it may be the generation time) and mode.
+    assert read_metadata((library / "a.png").read_bytes()).tags == ["fox", "red fox"]
+    after = (library / "a.png").stat()
+    assert (after.st_mtime_ns, after.st_mode) == (before.st_mtime_ns, before.st_mode)
+    # In the snapshot, with each file's identity unchanged.
+    got = items(client)
+    assert [got[a]["tags"], got[paths["sub/c.png"]]["tags"]] == [["fox", "red fox"], []]
+    assert {i: item["content_hash"] for i, item in got.items()} == hashes
+    assert client.get(f"/api/images/{a}").json()["file"]["tags"] == ["fox", "red fox"]
+    assert client.get("/api/facets").json()["tags"] == [
+        {"value": "fox", "count": 2},
+        {"value": "red fox", "count": 2},
+    ]
+    # The analysis panel counts them per family; shares are of all the family's files.
+    (group,) = client.post("/api/stats", json={"sections": ["categorical"]}).json()["groups"]
+    assert group["categorical"]["tags"] == {
+        "n": 2,
+        "values": [
+            {"value": "fox", "count": 2, "share": 2 / 3},
+            {"value": "red fox", "count": 2, "share": 2 / 3},
+        ],
+        "other": 0,
+        "missing": 0,
+    }
+    assert_index_finds_nothing_to_do(library, config)
+    # A full re-read finds them in the files.
+    Indexer(library, config, workers=1).run(full=True)
+    assert catalog_rows(library, "SELECT file_id, tag FROM tags ORDER BY file_id, tag") == [
+        (a, "fox"),
+        (a, "red fox"),
+        (b, "fox"),
+        (b, "red fox"),
+    ]
+    # Removing them all gives back the original bytes.
+    assert tag(client, [a], remove=["fox", "red fox"])["tagged"] == [{"id": a, "tags": []}]
+    assert (library / "a.png").read_bytes() == original
+    assert_index_finds_nothing_to_do(library, config)
+
+
+def test_tag_filter_and_untouched_files(client: TestClient, library: Path):
+    paths = ids_by_path(client)
+    a, b = paths["a.png"], paths["b.png"]
+    tag(client, [a], add=["fox"])
+    tag(client, [b], add=["owl"])
+
+    def ids(tags: list[str]) -> list[int]:
+        return client.post("/api/images/ids", json={"filters": {"tags": tags}}).json()["ids"]
+
+    assert ids(["fox"]) == [a]
+    assert ids(["fox", "owl"]) == [b, a]  # any of them, newest first
+    assert ids(["cat"]) == []
+    # Tags that would not change leave the file alone.
+    inode = (library / "a.png").stat().st_ino
+    assert tag(client, [a], add=["fox"], remove=["cat"])["tagged"] == [{"id": a, "tags": ["fox"]}]
+    assert (library / "a.png").stat().st_ino == inode
+
+
+def test_tagging_keeps_collection_links(client: TestClient):
+    file_id = ids_by_path(client)["a.png"]
+    content_hash = items(client)[file_id]["content_hash"]
+    body = {"title": "Fox", "positive": "a fox", "attempts": [content_hash]}
+    assert client.post("/api/collection/prompts", json=body).status_code == 200
+    assert items(client)[file_id]["saved"]
+    tag(client, [file_id], add=["fox"])
+    assert items(client)[file_id]["saved"]
+
+
+def test_tag_failures_are_per_file(client: TestClient, library: Path, config: Config):
+    buf = BytesIO()
+    Image.new("RGB", (8, 8)).save(buf, "JPEG")
+    foreign = jpeg_segment(0xE1, XMP_PREFIX + b'<x:xmpmeta xmlns:x="adobe:ns:meta/"/>')
+    jpeg = buf.getvalue()[:2] + foreign + buf.getvalue()[2:]
+    write_file(library, "other.jpg", jpeg, T0)
+    Indexer(library, config, workers=1).run()
+    server = server_of(client)
+    server.store.rebuild(prompts_in_background=False)
+    paths = ids_by_path(client)
+    write_file(library, "b.png", png_with_text({"prompt": API_TEXT}), T0)  # changed on disk
+
+    result = tag(client, [paths["a.png"], paths["other.jpg"], paths["b.png"], 999], add=["fox"])
+    assert result["tagged"] == [{"id": paths["a.png"], "tags": ["fox"]}]
+    assert result["failed"] == [
+        {
+            "id": paths["other.jpg"],
+            "message": "other.jpg: the file already holds XMP metadata from another program",
+        },
+        {
+            "id": paths["b.png"],
+            "message": "b.png: the file changed since it was indexed",
+        },
+        {"id": 999, "message": "no image with this id"},
+    ]
+    assert (library / "other.jpg").read_bytes() == jpeg
+    # The failures queued an index run, which catches up with b.png.
+    wait_for(lambda: server.last_finished_at is not None and not server.indexing)
+    assert tag(client, [ids_by_path(client)["b.png"]], add=["fox"])["failed"] == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"ids": [], "add": ["fox"]},
+        {"ids": list(range(1, TRASH_BATCH + 2)), "add": ["fox"]},
+        {"ids": [1], "add": [" "]},
+        {"ids": [1], "add": ["x" * 65]},
+        {"ids": [1], "add": ["a\tb"]},
+    ],
+)
+def test_tag_validation(client: TestClient, body: dict):
+    r = client.post("/api/images/tags", json=body)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_request"
+
+
+def test_tag_leaves_files_alone_when_the_catalog_is_busy(
+    client: TestClient, library: Path, monkeypatch
+):
+    monkeypatch.setattr(server_module, "_EDIT_BUSY_TIMEOUT", 0.05)
+    original = (library / "a.png").read_bytes()
+    file_id = ids_by_path(client)["a.png"]
+    blocker = sqlite3.connect(catalog_path(library), autocommit=True)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        r = client.post("/api/images/tags", json={"ids": [file_id], "add": ["fox"]})
+    finally:
+        blocker.execute("ROLLBACK")
+        blocker.close()
+    assert r.status_code == 503 and r.json()["error"]["code"] == "catalog_busy"
+    assert (library / "a.png").read_bytes() == original
+    assert items(client)[file_id]["tags"] == []

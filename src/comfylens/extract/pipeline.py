@@ -7,7 +7,6 @@ from comfylens.config import Config
 from comfylens.extract import components, strings
 from comfylens.extract.conditioning import SideTrace, generated_warnings, trace_side
 from comfylens.extract.family import UNKNOWN, match_family
-from comfylens.extract.inputs import generic_inputs
 from comfylens.extract.keys import (
     CHAIN_SEPARATOR,
     NO_LORAS,
@@ -23,10 +22,8 @@ from comfylens.extract.samplers import StageTrace, stage_nodes, trace_stages
 from comfylens.extract.switches import inactive_inputs
 from comfylens.extract.types import Extraction, LoraUse, SamplerStage
 from comfylens.extract.values import as_str
-from comfylens.graph.model import Graph, parse_graph
-from comfylens.graph.reachability import GraphCycle, Reachability, analyze_reachability
-from comfylens.metadata import RawMetadata, read_metadata
-from comfylens.metadata.types import Status
+from comfylens.graph import Graph, GraphCycle, Reachability, analyze_reachability, parse_graph
+from comfylens.metadata import RawMetadata, Status, read_metadata
 from comfylens.warn import Code, Warn
 
 
@@ -172,7 +169,6 @@ def extract(
         latent_source=latent_source,
         batch_size=batch_size,
         input_images=components.input_images(graph, reach),
-        generic_inputs=generic_inputs(graph, reach.reachable),
         lora_stack_key=stack_key,
         config_key=config_key(family, base_model, stack_key, primary, guidance, shift, decimals),
         generation_key=generation_key(api_prompt),

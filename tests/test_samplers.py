@@ -159,4 +159,3 @@ def test_no_sampler_is_informational(config):
     assert e.stages == []
     assert [w.code for w in e.warnings] == [Code.NO_SAMPLER]
     assert e.model_family == "ideogram"
-    assert {(i.input_name, i.value) for i in e.generic_inputs} >= {("aspect_ratio", "1:1")}

@@ -1,0 +1,51 @@
+"""The catalog: SQLite schema, connections and Polars frames."""
+
+from comfylens.db.connection import (
+    CatalogMissing,
+    chunks,
+    connect,
+    connect_readonly,
+    get_meta,
+    has_fts,
+    is_stale,
+    like_pattern,
+    open_catalog,
+    placeholders,
+    rows,
+    set_meta,
+    transaction,
+)
+from comfylens.db.read import (
+    FILES_SCHEMA,
+    GENERATIONS_SCHEMA,
+    LORAS_SCHEMA,
+    TAGS_SCHEMA,
+    files_frame,
+    generations_frame,
+    loras_frame,
+    tags_frame,
+)
+
+__all__ = [
+    "FILES_SCHEMA",
+    "GENERATIONS_SCHEMA",
+    "LORAS_SCHEMA",
+    "TAGS_SCHEMA",
+    "CatalogMissing",
+    "chunks",
+    "connect",
+    "connect_readonly",
+    "files_frame",
+    "generations_frame",
+    "get_meta",
+    "has_fts",
+    "is_stale",
+    "like_pattern",
+    "loras_frame",
+    "open_catalog",
+    "placeholders",
+    "rows",
+    "set_meta",
+    "tags_frame",
+    "transaction",
+]

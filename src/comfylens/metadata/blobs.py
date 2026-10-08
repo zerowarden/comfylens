@@ -44,35 +44,14 @@ def shape_of(obj: Any) -> Kind:
 
 
 def classify(texts: dict[str, str]) -> Classified:
-    kinds: dict[str, Kind] = {}
-    parsed: dict[str, dict[str, Any]] = {}
-    warnings: list[Warn] = []
-
-    for key, text in texts.items():
-        claim = _KEY_CLAIMS.get(base_key(key))
-        if text.lstrip().startswith("{"):
-            if len(text) > MAX_TEXT_BYTES:
-                kinds[key] = "oversized"
-                continue
-            try:
-                # stdlib json accepts the NaN and Infinity that ComfyUI can emit.
-                obj = json.loads(text)
-            except ValueError, RecursionError:
-                obj = None
-            kind: Kind = "text" if obj is None else shape_of(obj)
-            if kind in ("api_prompt", "workflow") and isinstance(obj, dict):
-                parsed[key] = obj
-        elif claim == "a1111" or _A1111.search(text):
-            kind = "a1111"
-        else:
-            kind = "text"
-        kinds[key] = kind
-        if claim is not None and claim != kind:
-            # Trust the shape over the name.
-            warnings.append(
-                Warn(Code.METADATA_KEY_MISMATCH, None, f"key {key!r} holds {kind}, not {claim}")
-            )
-
+    read = {key: _read(key, text) for key, text in texts.items()}
+    kinds: dict[str, Kind] = {key: kind for key, (kind, _) in read.items()}
+    # Trust the shape over the name.
+    warnings = [
+        Warn(Code.METADATA_KEY_MISMATCH, None, f"key {key!r} holds {kind}, not {claim}")
+        for key, kind in kinds.items()
+        if (claim := _KEY_CLAIMS.get(base_key(key))) not in (None, kind) and kind != "oversized"
+    ]
     if "a1111" in kinds.values():
         warnings.append(
             Warn(Code.UNSUPPORTED_FORMAT, None, "A1111 parameters text is stored but not parsed")
@@ -82,11 +61,31 @@ def classify(texts: dict[str, str]) -> Classified:
     return Classified(
         kinds,
         api_key,
-        parsed[api_key] if api_key else None,
+        read[api_key][1] if api_key else None,
         workflow_key,
-        parsed[workflow_key] if workflow_key else None,
+        read[workflow_key][1] if workflow_key else None,
         warnings,
     )
+
+
+def _read(key: str, text: str) -> tuple[Kind, dict[str, Any] | None]:
+    """A text's kind, and its JSON object when that is an API prompt or a workflow."""
+    if not text.lstrip().startswith("{"):
+        a1111 = _KEY_CLAIMS.get(base_key(key)) == "a1111" or _A1111.search(text)
+        return ("a1111" if a1111 else "text"), None
+    if len(text) > MAX_TEXT_BYTES:
+        return "oversized", None
+    obj = _json(text)
+    kind: Kind = "text" if obj is None else shape_of(obj)
+    return kind, obj if kind in ("api_prompt", "workflow") else None
+
+
+def _json(text: str) -> Any:
+    try:
+        # stdlib json accepts the NaN and Infinity that ComfyUI can emit.
+        return json.loads(text)
+    except ValueError, RecursionError:
+        return None
 
 
 def _pick(kinds: dict[str, Kind], kind: Kind) -> str | None:

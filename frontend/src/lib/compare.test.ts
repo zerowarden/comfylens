@@ -84,7 +84,12 @@ function detail(
     width?: number;
   } = {},
 ): ImageDetail {
-  const width = over.width ?? 1024;
+  const {
+    width,
+    generation: gen,
+    loras,
+  } = { width: 1024, generation: generation(), loras: [], ...over };
+  const bare = gen === null; // a file without metadata
   return {
     file: {
       id: 1,
@@ -99,12 +104,13 @@ function detail(
       content_hash: "0".repeat(32),
       generated_at: 1_790_000_000,
       timestamp_suspect: false,
-      status: over.generation === null ? "no_metadata" : "ok",
+      status: bare ? "no_metadata" : "ok",
       error: null,
+      tags: [],
     },
-    generation: over.generation === undefined ? generation() : over.generation,
-    stages: over.stages ?? (over.generation === null ? [] : [stage(0)]),
-    loras: over.loras ?? [],
+    generation: gen,
+    stages: over.stages ?? (bare ? [] : [stage(0)]),
+    loras,
     input_images: [],
     nodes: [],
     warnings: [],

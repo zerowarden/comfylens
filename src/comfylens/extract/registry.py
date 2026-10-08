@@ -1,6 +1,6 @@
 """class_type -> role and the inputs each role reads.
 
-Register a class only when it affects a normalized field; the generic layer covers the rest.
+Register a class only when it affects a normalized field; other classes are listed, not read.
 Input names match ComfyUI core and rgthree-comfy.
 """
 
@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal
 
-from comfylens.graph.reachability import Switch
+from comfylens.graph import Switch
 
 Kind = Literal["", "unet", "ckpt", "power", "soft"]
 

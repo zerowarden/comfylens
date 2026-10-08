@@ -4,7 +4,7 @@ from collections.abc import Callable, Collection
 from typing import Any
 
 from comfylens.extract.registry import REGISTRY, Role
-from comfylens.graph.model import Graph, Link
+from comfylens.graph import Graph, Link
 
 
 def source_literal(

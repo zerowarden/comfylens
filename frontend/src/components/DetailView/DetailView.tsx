@@ -4,15 +4,17 @@ import { Fragment, useEffect, type ReactNode } from "react";
 import { api, fileUrl } from "../../api/client";
 import type { ImageDetail } from "../../api/types";
 import { settingsRows } from "../../lib/compare";
+import { saveImageToCollection } from "../../lib/collection";
 import { baseName } from "../../lib/files";
 import { fmtBytes, fmtNum, loadingText } from "../../lib/format";
 import { useImageDetail, useImageOrder } from "../../lib/images";
+import { useCollection } from "../../state/collection";
 import { useFileActions } from "../../state/fileActions";
 import { useUi } from "../../state/ui";
 import { chainKind } from "../../lib/chains";
 import CollectionSection from "../Collection/CollectionSection";
 import { ChainText, Glyph } from "../icons";
-import { Button, LINK_BUTTON, td } from "../ui";
+import { Button, Heading, LINK_BUTTON, td } from "../ui";
 import {
   GraphCopyButtons,
   PromptBox,
@@ -43,6 +45,7 @@ function Settings({ d }: { d: ImageDetail }) {
     <table className="w-full text-xs">
       <tbody>
         <Row label="path" value={f.rel_path} />
+        <Row label="tags" value={f.tags.join(", ")} />
         <Row
           label="file"
           value={`${f.format.toUpperCase()} ${f.width ?? "?"}×${f.height ?? "?"}, ${fmtNum(f.megapixels)} MP, ${f.aspect_label ?? "?"}, ${fmtBytes(f.size)}`}
@@ -71,20 +74,61 @@ function StagePrompts({ d }: { d: ImageDetail }) {
   ));
 }
 
+/** The actions on the image, laid out as one section; the graph copies are secondary. */
+function Actions({ id, relPath }: { id: number; relPath: string }) {
+  const client = useQueryClient();
+  const openDialog = useFileActions((s) => s.openDialog);
+  const openLinking = useCollection((s) => s.openLinking);
+  const raw = () => client.fetchQuery({ queryKey: ["raw", id], queryFn: () => api.raw(id) });
+  return (
+    <section className="space-y-2">
+      <Heading>Actions</Heading>
+      <div className="grid grid-cols-2 gap-1.5">
+        <a
+          href={fileUrl(id)}
+          download={baseName(relPath)}
+          className={`${LINK_BUTTON} inline-flex items-center justify-center gap-1.5 text-center`}
+        >
+          <Glyph name="download" className="size-3.5" />
+          Download original
+        </a>
+        <Button
+          className="inline-flex items-center justify-center gap-1.5"
+          onClick={() => openDialog({ kind: "tags", ids: [id] })}
+        >
+          <Glyph name="tag" className="size-3.5" />
+          Edit tags…
+        </Button>
+        <Button
+          className="inline-flex items-center justify-center gap-1.5"
+          onClick={() => void saveImageToCollection(id)}
+        >
+          <Glyph name="bookmarkPlus" className="size-3.5" />
+          Save to collection
+        </Button>
+        <Button
+          className="inline-flex items-center justify-center gap-1.5"
+          onClick={() => openLinking([id])}
+        >
+          <Glyph name="link" className="size-3.5" />
+          Add to saved prompt…
+        </Button>
+      </div>
+      <div className="flex flex-wrap items-center gap-1 text-xs text-muted">
+        Copy
+        <GraphCopyButtons load={raw} />
+      </div>
+    </section>
+  );
+}
+
 function Details({ id }: { id: number }) {
-  const queryClient = useQueryClient();
   const query = useImageDetail(id);
-  const raw = () => queryClient.fetchQuery({ queryKey: ["raw", id], queryFn: () => api.raw(id) });
   const d = query.data;
   if (!d) return <div className="p-4 text-muted">{loadingText(query.error)}</div>;
   return (
     <div className="space-y-3 p-3">
-      <div className="flex flex-wrap gap-2">
-        <GraphCopyButtons load={raw} />
-        <a href={fileUrl(id)} download={baseName(d.file.rel_path)} className={LINK_BUTTON}>
-          Download original
-        </a>
-      </div>
+      <Actions id={id} relPath={d.file.rel_path} />
       <CollectionSection id={id} />
       <Settings d={d} />
       {d.generation && <LoraChain detail={d} />}
@@ -200,30 +244,8 @@ export default function DetailView() {
           <ViewerHeader onClose={() => openDetail(null)}>
             <span className="font-medium">Image {shown}</span>
             {index >= 0 && (
-              <span className="flex items-center gap-1 text-xs text-muted">
+              <span className="text-xs text-muted">
                 {index + 1} of {order.length}
-                <span className="ml-1 inline-flex gap-0.5">
-                  <Button
-                    ghost
-                    title="Previous image (Left arrow)"
-                    ariaLabel="Previous image"
-                    disabled={previous === undefined}
-                    onClick={() => previous !== undefined && openDetail(previous)}
-                    className="px-0.5"
-                  >
-                    <Glyph name="arrowLeft" className="size-3.5" />
-                  </Button>
-                  <Button
-                    ghost
-                    title="Next image (Right arrow)"
-                    ariaLabel="Next image"
-                    disabled={next === undefined}
-                    onClick={() => next !== undefined && openDetail(next)}
-                    className="px-0.5"
-                  >
-                    <Glyph name="arrowRight" className="size-3.5" />
-                  </Button>
-                </span>
               </span>
             )}
             <span className="flex-1" />

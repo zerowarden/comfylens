@@ -4,7 +4,7 @@ from typing import Any
 
 from comfylens.extract.registry import REGISTRY, Role
 from comfylens.extract.switches import through_switches
-from comfylens.graph.model import Graph, Link
+from comfylens.graph import Graph, Link
 
 
 def resolve(

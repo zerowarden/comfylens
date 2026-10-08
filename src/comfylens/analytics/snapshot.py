@@ -2,7 +2,7 @@
 
 Built at startup and after every index run, then swapped in by one reference assignment:
 queries during a rebuild use the previous snapshot. Prompt frames follow in a background
-thread; until they are ready `prompts` is None. A rename or trash from the UI patches the
+thread; until they are ready `prompts` is None. A rename, retag or trash from the UI patches the
 current snapshot's frames in place, each by one reference assignment, instead of rebuilding.
 """
 
@@ -18,38 +18,30 @@ import polars as pl
 
 from comfylens.analytics.prompts import PromptFrames, build_prompt_frames, empty_prompt_frames
 from comfylens.config import Config, resolve_workers
-from comfylens.db.connection import CatalogMissing, connect_readonly, has_fts
-from comfylens.db.read import (
+from comfylens.db import (
     FILES_SCHEMA,
     GENERATIONS_SCHEMA,
     LORAS_SCHEMA,
+    TAGS_SCHEMA,
+    CatalogMissing,
+    connect_readonly,
     files_frame,
     generations_frame,
+    has_fts,
     loras_frame,
+    tags_frame,
 )
-from comfylens.extract.normalize import aspect, megapixels
-from comfylens.warn import INFORMATIONAL_CODES
+from comfylens.extract import aspect, megapixels
 
 NO_METADATA = "(no metadata)"  # the family of files without a generations row
-
-NODE_INPUTS_SCHEMA = {
-    "file_id": pl.Int64,
-    "class_type": pl.Categorical,
-    "input_name": pl.Categorical,
-    "kind": pl.Categorical,
-    "value_num": pl.Float64,
-    "value_text": pl.String,
-}
 
 
 @dataclass(slots=True)
 class Snapshot:
-    # One row per file: file columns, every scalar generations column (null without one),
-    # and derived columns megapixels, aspect, aspect_label, resolution, date, has_warnings
-    # (a warning other than the informational ones).
+    # One row per file: file columns, every scalar generations column (null without one), its
+    # sorted tags, and derived columns megapixels, aspect, aspect_label, resolution and date.
     images: pl.DataFrame
     loras: pl.DataFrame  # reachable, enabled LoRA uses
-    node_inputs: pl.DataFrame  # reachable nodes only
     fts: bool
     built_at: float
     prompts: PromptFrames | None = None
@@ -58,15 +50,13 @@ class Snapshot:
 
 def empty_snapshot() -> Snapshot:
     images = _derive(
-        pl.DataFrame(schema=FILES_SCHEMA).join(
-            pl.DataFrame(schema=GENERATIONS_SCHEMA), left_on="id", right_on="file_id", how="left"
-        ),
-        set(),
+        pl.DataFrame(schema=FILES_SCHEMA),
+        pl.DataFrame(schema=GENERATIONS_SCHEMA),
+        pl.DataFrame(schema=TAGS_SCHEMA),
     )
     return Snapshot(
         images=images,
         loras=pl.DataFrame(schema=LORAS_SCHEMA),
-        node_inputs=pl.DataFrame(schema=NODE_INPUTS_SCHEMA),
         fts=False,
         built_at=time.time(),
         prompts=empty_prompt_frames(),
@@ -82,32 +72,16 @@ def build_snapshot(catalog: Path) -> Snapshot:
         conn.close()
 
 
-def snapshot_from_conn(conn: sqlite3.Connection, *, with_node_inputs: bool = True) -> Snapshot:
-    """Everything except prompt frames, from one read transaction's consistent catalog view.
-
-    `with_node_inputs=False` skips the generic-input table, which only the advanced panel
-    reads; the report uses this to stay cheap.
-    """
+def snapshot_from_conn(conn: sqlite3.Connection) -> Snapshot:
+    """Everything except prompt frames, from one read transaction's consistent catalog view."""
     conn.execute("BEGIN")
     try:
         files = files_frame(conn)
         gens = generations_frame(conn)
-        informational = sorted(INFORMATIONAL_CODES)
-        warned = {
-            r[0]
-            for r in conn.execute(
-                "SELECT DISTINCT file_id FROM warnings"
-                f" WHERE code NOT IN ({','.join('?' * len(informational))})",
-                informational,
-            )
-        }
-        images = _derive(files.join(gens, left_on="id", right_on="file_id", how="left"), warned)
+        images = _derive(files, gens, tags_frame(conn))
         return Snapshot(
             images=images,
             loras=loras_frame(conn),
-            node_inputs=_node_inputs(conn)
-            if with_node_inputs
-            else pl.DataFrame(schema=NODE_INPUTS_SCHEMA),
             fts=has_fts(conn),
             built_at=time.time(),
         )
@@ -115,7 +89,10 @@ def snapshot_from_conn(conn: sqlite3.Connection, *, with_node_inputs: bool = Tru
         conn.execute("ROLLBACK")  # read-only: autocommit connections ignore conn.rollback()
 
 
-def _derive(joined: pl.DataFrame, warned: set[int]) -> pl.DataFrame:
+def _derive(files: pl.DataFrame, gens: pl.DataFrame, tags: pl.DataFrame) -> pl.DataFrame:
+    joined = files.join(gens, left_on="id", right_on="file_id", how="left").join(
+        tags, left_on="id", right_on="file_id", how="left"
+    )
     sizes = joined.select("width", "height").unique().drop_nulls()
     labels = pl.DataFrame(
         [(w, h, *aspect(w, h), megapixels(w, h)) for w, h in sizes.iter_rows() if h],
@@ -142,23 +119,12 @@ def _derive(joined: pl.DataFrame, warned: set[int]) -> pl.DataFrame:
             pl.col("model_family").is_not_null().alias("has_generation"),
             pl.col("seed").cast(pl.UInt64, strict=False),
             pl.format("{}x{}", "width", "height").alias("resolution"),
-            pl.col("id").is_in(list(warned)).alias("has_warnings"),
+            pl.col("tags").fill_null([]),
         )
         .join(labels, on=["width", "height"], how="left")
         .join(dates, on="generated_at", how="left")
         .sort("id")
     )
-
-
-def _node_inputs(conn: sqlite3.Connection) -> pl.DataFrame:
-    cursor = conn.execute(
-        "SELECT file_id, class_type, input_name, kind, value_num, value_text"
-        " FROM node_inputs WHERE reachable = 1"
-    )
-    frames = []
-    while batch := cursor.fetchmany(200_000):
-        frames.append(pl.DataFrame(batch, schema=NODE_INPUTS_SCHEMA, orient="row"))
-    return pl.concat(frames) if frames else pl.DataFrame(schema=NODE_INPUTS_SCHEMA)
 
 
 def prompt_rows(catalog: Path) -> list[tuple[int, str | None, str | None]]:
@@ -260,6 +226,17 @@ def apply_rename(snap: Snapshot, file_id: int, rel_path: str, generated_at: int)
     snap.built_at = time.time()
 
 
+def apply_tags(snap: Snapshot, tags: dict[int, list[str]]) -> None:
+    """Patch retagged files into `snap`, through SnapshotStore.patch."""
+    changed = pl.DataFrame(
+        {"id": list(tags), "tags": list(tags.values())},
+        schema={"id": pl.Int64, "tags": pl.List(pl.String)},
+    )
+    snap.images = snap.images.update(changed, on="id")
+    snap.facets_cache = {}  # after the frames: see facets()
+    snap.built_at = time.time()
+
+
 def apply_removal(snap: Snapshot, ids: Collection[int]) -> None:
     """Drop removed files from `snap`, through SnapshotStore.patch.
 
@@ -268,6 +245,5 @@ def apply_removal(snap: Snapshot, ids: Collection[int]) -> None:
     gone = pl.Series(list(ids), dtype=pl.Int64).implode()
     snap.images = snap.images.filter(~pl.col("id").is_in(gone))
     snap.loras = snap.loras.filter(~pl.col("file_id").is_in(gone))
-    snap.node_inputs = snap.node_inputs.filter(~pl.col("file_id").is_in(gone))
     snap.facets_cache = {}  # after the frames: see facets()
     snap.built_at = time.time()

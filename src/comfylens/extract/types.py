@@ -1,11 +1,8 @@
 """Results of semantic extraction."""
 
 from dataclasses import dataclass
-from typing import Literal
 
 from comfylens.warn import Warn
-
-GenericKind = Literal["num", "str", "bool", "json"]
 
 
 @dataclass(slots=True)
@@ -59,16 +56,6 @@ class InputImage:
 
 
 @dataclass(slots=True)
-class GenericInput:
-    node_id: str
-    class_type: str
-    input_name: str  # dict inputs flattened with dots: "lora_1.strength"
-    kind: GenericKind
-    value: bool | int | float | str  # json kind: serialized JSON
-    reachable: bool
-
-
-@dataclass(slots=True)
 class Extraction:
     """Image-level fields are the primary stage's, except `model_family`, which names every
     stage's family in order: "krea-2 + qwen-image-2.1" for a pass through two models."""
@@ -87,7 +74,6 @@ class Extraction:
     latent_source: str | None
     batch_size: int | None
     input_images: list[InputImage]
-    generic_inputs: list[GenericInput]
     lora_stack_key: str
     config_key: str
     generation_key: str

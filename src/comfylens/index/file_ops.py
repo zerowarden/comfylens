@@ -1,4 +1,4 @@
-"""Renaming and trashing library files on the user's request.
+"""Renaming, tagging and trashing library files on the user's request.
 
 This module and its callers in the server are the only code that changes the library; the
 indexer and the watcher only read it. Each operation updates the file on disk and its catalog
@@ -7,15 +7,18 @@ row together, so the next index run finds nothing to do for it.
 
 import os
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from send2trash import send2trash
 
 from comfylens.config import Config
-from comfylens.db.connection import chunks, placeholders, transaction
+from comfylens.db import chunks, placeholders, transaction
+from comfylens.fileio import write_atomic
 from comfylens.index.timestamps import generated_at
-from comfylens.index.write import delete_files
+from comfylens.index.write import delete_files, replace_tags
+from comfylens.metadata import CannotTag, write_tags
 
 MAX_NAME_BYTES = 255  # NAME_MAX on Linux and macOS
 
@@ -36,11 +39,22 @@ class UnknownFile(LookupError):
     """No catalog row has this id."""
 
 
+class Unrewritable(RuntimeError):
+    """The file is not rewritten in place: a symbolic link, or not the file the catalog
+    describes (the catalog is behind)."""
+
+
 @dataclass(frozen=True, slots=True)
 class Renamed:
     rel_path: str
     generated_at: int
     replaced: int | None  # id of a stale row that held the new path, now deleted
+
+
+@dataclass(slots=True)
+class Tagged:
+    tags: dict[int, list[str]] = field(default_factory=dict)  # id -> its tags after the edit
+    failed: list[tuple[int, str]] = field(default_factory=list)  # (id, reason)
 
 
 @dataclass(slots=True)
@@ -132,6 +146,91 @@ def rename_file(
     return Renamed(new_rel, stamp, stale[0] if stale else None)
 
 
+def tag_files(
+    root: Path, conn: sqlite3.Connection, ids: list[int], add: list[str], remove: list[str]
+) -> Tagged:
+    """Remove, then add tags, in the files themselves and in the catalog.
+
+    A file whose tags would not change is not written. Failures are reported per file; the
+    other files are still tagged. Raises sqlite3.OperationalError, before any file is written,
+    when the catalog is busy.
+    """
+    result = Tagged()
+    with transaction(conn):  # held while files are written, so each row follows its file
+        rows: dict[int, tuple[str, int, int]] = {}
+        current: dict[int, set[str]] = {}
+        for chunk in chunks(ids):
+            marks = placeholders(len(chunk))
+            for file_id, *row in conn.execute(
+                f"SELECT id, rel_path, size, mtime_ns FROM files WHERE id IN ({marks})", chunk
+            ):
+                rows[file_id] = tuple(row)
+            for file_id, tag in conn.execute(
+                f"SELECT file_id, tag FROM tags WHERE file_id IN ({marks})", chunk
+            ):
+                current.setdefault(file_id, set()).add(tag)
+        for file_id in dict.fromkeys(ids):
+            if file_id not in rows:
+                result.failed.append((file_id, "no image with this id"))
+                continue
+            before = current.get(file_id, set())
+            tags = sorted(before.difference(remove).union(add))
+            try:
+                if tags != sorted(before):
+                    _retag(root, conn, file_id, *rows[file_id], tags)
+            except (CannotTag, Unrewritable, OSError) as e:
+                result.failed.append((file_id, failure(rows[file_id][0], e)))
+                continue
+            result.tags[file_id] = tags
+    return result
+
+
+def _retag(
+    root: Path,
+    conn: sqlite3.Connection,
+    file_id: int,
+    rel_path: str,
+    size: int,
+    mtime_ns: int,
+    tags: list[str],
+) -> None:
+    rewrite(root, rel_path, size, mtime_ns, lambda data: write_tags(data, tags))
+    st = Path(library_path(root, rel_path)).stat()
+    conn.execute(
+        "UPDATE files SET size = ?, mtime_ns = ? WHERE id = ?",
+        (st.st_size, st.st_mtime_ns, file_id),
+    )
+    replace_tags(conn, file_id, tags)
+
+
+def rewrite(
+    root: Path, rel_path: str, size: int, mtime_ns: int, change: Callable[[bytes], bytes | None]
+) -> bytes | None:
+    """Rewrite an indexed file in place with `change`, which returns None to leave it as it is.
+
+    Only the file the catalog row (size, mtime) describes is changed, never a symbolic link. The
+    write goes through a temporary file, and the file keeps its permissions and modification
+    time, which may be the time the image was generated. Returns the new bytes. Raises
+    Unrewritable, FileMissing or OSError, and whatever `change` raises.
+    """
+    path = Path(library_path(root, rel_path))
+    if path.is_symlink():
+        raise Unrewritable("a symbolic link is not rewritten")
+    st = path.stat()
+    if (st.st_size, st.st_mtime_ns) != (size, mtime_ns):
+        raise Unrewritable("the file changed since it was indexed")
+    data = change(path.read_bytes())
+    if data is not None:
+        write_atomic(path, lambda f: f.write(data), keep_stat=True)
+    return data
+
+
+def failure(rel_path: str, e: Exception) -> str:
+    """A per-file failure as reported: the path, then the reason."""
+    reason = e.strerror if isinstance(e, OSError) and e.strerror else e
+    return f"{rel_path}: {reason}"
+
+
 def trash_files(root: Path, conn: sqlite3.Connection, ids: list[int]) -> Trashed:
     """Move files to the system trash and drop their catalog rows.
 
@@ -160,7 +259,7 @@ def trash_files(root: Path, conn: sqlite3.Connection, ids: list[int]) -> Trashed
             result.failed.append((file_id, f"{rel_path}: the path leaves the library"))
             continue
         except OSError as e:
-            result.failed.append((file_id, f"{rel_path}: {e.strerror or e}"))
+            result.failed.append((file_id, failure(rel_path, e)))
             continue
         result.removed.append(file_id)
     if result.removed:

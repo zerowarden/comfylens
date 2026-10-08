@@ -5,12 +5,12 @@ import type { LoraKey, PromptBy, PromptSide, Section } from "../../api/types";
 import { useScope } from "../../lib/scope";
 import { loadingText } from "../../lib/format";
 
-const ALL: Section[] = ["numeric", "categorical", "seeds", "loras", "graph", "configs"];
+const ALL: Section[] = ["numeric", "categorical", "seeds", "loras", "configs"];
 
 /** Statistics for the current scope; `lora_key: base_name` is fetched only for the LoRA tab. */
 export function useStats(loraKey: LoraKey = "name", enabled = true) {
   const { scope, key } = useScope();
-  const sections: Section[] = loraKey === "name" ? ALL : ["loras", "graph"];
+  const sections: Section[] = loraKey === "name" ? ALL : ["loras"];
   return useQuery({
     queryKey: ["stats", key, loraKey],
     queryFn: () => api.stats({ ...scope, sections, lora_key: loraKey }),
@@ -53,7 +53,8 @@ export function useDistinctive(side: PromptSide, by: PromptBy) {
   return useQuery({
     queryKey: ["distinctive", key, side, by],
     queryFn: () => api.distinctive({ ...scope, side, by }),
-    enabled: scope.selection.length > 0,
+    // Terms that set one image apart from the rest say nothing: two or more are needed.
+    enabled: scope.selection.length > 1,
     // Keep the previous selection's terms on screen while the next ones load.
     placeholderData: keepPreviousData,
     ...warmingRetry,

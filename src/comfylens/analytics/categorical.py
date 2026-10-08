@@ -28,6 +28,18 @@ def value_counts(values: pl.Series, top_n: int) -> dict[str, Any]:
     }
 
 
+def tag_counts(tags: pl.Series, top_n: int) -> dict[str, Any]:
+    """value_counts over each file's tags: a share is of all files, `n` counts the tagged ones,
+    and untagged files are not missing data."""
+    counts = value_counts(tags.explode(empty_as_null=False), top_n)
+    files = tags.len()
+    return {
+        **counts,
+        "n": int((tags.list.len() > 0).sum()),
+        "values": [{**v, "share": v["count"] / files} for v in counts["values"]],
+    }
+
+
 def seed_stats(seeds: pl.Series) -> dict[str, Any]:
     """Seeds are identifiers: count distinct values and repeats, never average them."""
     s = seeds.drop_nulls()

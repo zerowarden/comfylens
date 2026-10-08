@@ -1,5 +1,6 @@
 """Selection and filters -> the files a request covers."""
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, Any, Literal, Protocol
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field
 from comfylens.analytics.collection import has_hash
 from comfylens.analytics.snapshot import NO_METADATA, Snapshot
 from comfylens.config import AnalysisConfig
-from comfylens.metadata.types import Status
+from comfylens.metadata import Status
 
 
 class Lookup(Protocol):
@@ -60,6 +61,7 @@ class LoraFilter(BaseModel):
 
 
 class Filters(BaseModel):
+    tags: list[str] = []  # files holding any of them
     families: list[str] = []  # "(no metadata)" matches files without a generations row
     base_models: list[str] = []
     samplers: list[str] = []
@@ -70,7 +72,6 @@ class Filters(BaseModel):
     statuses: list[Status] = []
     text: str = ""  # prompt search, both sides
     numeric: dict[NumericFilterField, tuple[float, float]] = {}  # inclusive ranges
-    has_warnings: bool | None = None
     saved: bool | None = None  # content hash linked to any saved prompt (or to none)
     saved_prompt: int | None = None  # one saved prompt's files: linked, or the same prompt
     sentences: list[SentenceKey] = []  # similar-sentence cluster: the member sentence hashes
@@ -103,60 +104,92 @@ class Resolved:
 
 
 def is_filtered(f: Filters) -> bool:
-    dates = f.date_from is not None or f.date_to is not None
-    lists = any(getattr(f, name) for name in _LIST_FILTERS)
-    return bool(
-        lists
-        or dates
-        or f.loras.names
-        or f.text.strip()
-        or f.numeric
-        or f.has_warnings is not None
-        or f.saved is not None
-        or f.saved_prompt is not None
-        or f.sentences
-    )
+    # Blank search text, and a LoRA mode without LoRAs, filter nothing.
+    loras = f.loras if f.loras.names else LoraFilter()
+    return f.model_copy(update={"text": f.text.strip(), "loras": loras}) != Filters()
 
 
 def filter_files(
     snap: Snapshot, f: Filters, lookup: Lookup, *, ignore_dates: bool = False
 ) -> pl.DataFrame:
     """Files matching every filter; empty filters mean the whole library."""
-    conditions: list[pl.Expr] = []
-    for name, column in _LIST_FILTERS.items():
-        values: list[str] = getattr(f, name)
-        if not values:
-            continue
-        condition = pl.col(column).is_in(values)
-        if name == "families" and NO_METADATA in values:
-            condition = condition | pl.col("model_family").is_null()
-        conditions.append(condition)
-    if not ignore_dates:
-        if f.date_from is not None:
-            conditions.append(pl.col("date") >= f.date_from)
-        if f.date_to is not None:
-            conditions.append(pl.col("date") <= f.date_to)
-    for field, (low, high) in f.numeric.items():
-        conditions.append(pl.col(field).is_between(low, high))
-    if f.has_warnings is not None:
-        conditions.append(pl.col("has_warnings") == f.has_warnings)
-    if f.loras.names:
-        conditions.append(
-            pl.col("id").is_in(_lora_ids(snap, f.loras.names, f.loras.mode).implode())
-        )
-    if f.text.strip():
-        conditions.append(pl.col("id").is_in(sorted(lookup.search(f.text.strip()))))
-    if f.saved is not None:
-        saved = has_hash(lookup.saved_hashes())
-        conditions.append(saved if f.saved else ~saved)
-    if f.saved_prompt is not None:
-        ids = pl.Series(sorted(lookup.saved_prompt_ids(f.saved_prompt)), dtype=pl.Int64)
-        conditions.append(pl.col("id").is_in(ids.implode()))
-    if f.sentences:
-        found = lookup.sentence_ids({int(s, 16) for s in f.sentences})
-        ids = pl.Series(sorted(found), dtype=pl.Int64)
-        conditions.append(pl.col("id").is_in(ids.implode()))
+    if ignore_dates:
+        f = f.model_copy(update={"date_from": None, "date_to": None})
+    conditions = [
+        *(
+            _in_list(column, values)
+            for name, column in _LIST_FILTERS.items()
+            if (values := getattr(f, name))
+        ),
+        *(pl.col(field).is_between(low, high) for field, (low, high) in f.numeric.items()),
+        *(c for rule in _RULES if (c := rule(f, snap, lookup)) is not None),
+    ]
     return snap.images.filter(*conditions) if conditions else snap.images
+
+
+def _in_list(column: str, values: list[str]) -> pl.Expr:
+    condition = pl.col(column).is_in(values)
+    # "(no metadata)" is the family of files without a generations row.
+    no_family = column == "model_family" and NO_METADATA in values
+    return condition | pl.col(column).is_null() if no_family else condition
+
+
+def _ids(ids: Iterable[int]) -> pl.Expr:
+    return pl.col("id").is_in(pl.Series(sorted(ids), dtype=pl.Int64).implode())
+
+
+# One condition per optional filter, or None while the filter is unset.
+type _Rule = Callable[[Filters, Snapshot, Lookup], pl.Expr | None]
+
+
+def _tags(f: Filters, snap: Snapshot, lookup: Lookup) -> pl.Expr | None:
+    return pl.col("tags").list.eval(pl.element().is_in(f.tags)).list.any() if f.tags else None
+
+
+def _date_from(f: Filters, snap: Snapshot, lookup: Lookup) -> pl.Expr | None:
+    return None if f.date_from is None else pl.col("date") >= f.date_from
+
+
+def _date_to(f: Filters, snap: Snapshot, lookup: Lookup) -> pl.Expr | None:
+    return None if f.date_to is None else pl.col("date") <= f.date_to
+
+
+def _loras(f: Filters, snap: Snapshot, lookup: Lookup) -> pl.Expr | None:
+    names, mode = f.loras.names, f.loras.mode
+    return pl.col("id").is_in(_lora_ids(snap, names, mode).implode()) if names else None
+
+
+def _text(f: Filters, snap: Snapshot, lookup: Lookup) -> pl.Expr | None:
+    text = f.text.strip()
+    return _ids(lookup.search(text)) if text else None
+
+
+def _saved(f: Filters, snap: Snapshot, lookup: Lookup) -> pl.Expr | None:
+    if f.saved is None:
+        return None
+    saved = has_hash(lookup.saved_hashes())
+    return saved if f.saved else ~saved
+
+
+def _saved_prompt(f: Filters, snap: Snapshot, lookup: Lookup) -> pl.Expr | None:
+    return None if f.saved_prompt is None else _ids(lookup.saved_prompt_ids(f.saved_prompt))
+
+
+def _sentences(f: Filters, snap: Snapshot, lookup: Lookup) -> pl.Expr | None:
+    hashes = {int(s, 16) for s in f.sentences}
+    return _ids(lookup.sentence_ids(hashes)) if hashes else None
+
+
+_RULES: tuple[_Rule, ...] = (
+    _tags,
+    _date_from,
+    _date_to,
+    _loras,
+    _text,
+    _saved,
+    _saved_prompt,
+    _sentences,
+)
 
 
 def _lora_ids(snap: Snapshot, names: list[str], mode: str) -> pl.Series:

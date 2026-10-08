@@ -9,7 +9,7 @@ export function rangeText(s: NumericStats): string {
 const str = (v: unknown) => (v === null || v === undefined ? "?" : String(v));
 const num = (v: unknown) => (typeof v === "number" ? fmtNum(v) : "?");
 
-export const FIELD_SEPARATOR = " | ";
+const FIELD_SEPARATOR = " | ";
 
 /** A configuration's fields in display order: model, LoRA stack, sampler/scheduler, steps, ... */
 export function configParts(fields: Record<string, unknown>): string[] {
@@ -21,9 +21,12 @@ export function configParts(fields: Record<string, unknown>): string[] {
     `cfg ${num(fields.cfg)}`,
     `denoise ${num(fields.denoise)}`,
   ];
-  if (typeof fields.guidance === "number") parts.push(`guidance ${fmtNum(fields.guidance)}`);
-  if (typeof fields.shift === "number") parts.push(`shift ${fmtNum(fields.shift)}`);
-  return parts;
+  // Guidance and shift only where the graph sets them.
+  const optional = (["guidance", "shift"] as const).flatMap((name) => {
+    const value = fields[name];
+    return typeof value === "number" ? [`${name} ${fmtNum(value)}`] : [];
+  });
+  return [...parts, ...optional];
 }
 
 export function configText(fields: Record<string, unknown>): string {
@@ -32,6 +35,7 @@ export function configText(fields: Record<string, unknown>): string {
 
 /** Categorical values that map onto a filter: clicking one adds it. */
 export const FILTERABLE: Partial<Record<string, ListField>> = {
+  tags: "tags",
   model_family: "families",
   base_model: "base_models",
   sampler_name: "samplers",

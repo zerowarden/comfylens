@@ -1,0 +1,9 @@
+.git
+.gitignore
+.venv
+.cache
+**/__pycache__
+**/*.pyc
+frontend/node_modules
+src/comfylens/web
+tests/fixtures/private

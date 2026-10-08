@@ -4,13 +4,12 @@ import re
 from collections import deque
 
 from comfylens.extract.normalize import model_stem
-from comfylens.extract.registry import REGISTRY, Role, role_of
+from comfylens.extract.registry import REGISTRY, Entry, Role, role_of
 from comfylens.extract.samplers import StageTrace
 from comfylens.extract.switches import follow, through_switches
 from comfylens.extract.types import InputImage
 from comfylens.extract.values import as_int, as_str, read_str
-from comfylens.graph.model import Graph, Node
-from comfylens.graph.reachability import Reachability, upstream
+from comfylens.graph import Graph, Node, Reachability, upstream
 
 _SHA256 = re.compile(r"[0-9a-fA-F]{64}")
 
@@ -20,23 +19,34 @@ def text_encoders(graph: Graph, encoder_ids: list[str]) -> tuple[list[str], str 
 
     LoRA nodes (and anything else with a `clip` input) pass CLIP through.
     """
-    names: list[str] = []
-    clip_type: str | None = None
-    for encoder_id in encoder_ids:
-        link = graph.nodes[encoder_id].link("clip")
-        for node in follow(graph, link, "clip"):
-            entry = REGISTRY.get(node.class_type)
-            if entry is not None and (
+    loaders = [loader for i in encoder_ids if (loader := _clip_loader(graph, i)) is not None]
+    names = [
+        model_stem(value)
+        for node, entry in loaders
+        for name in entry.names
+        if (value := as_str(node.literal(name)))
+    ]
+    clip_type = next(
+        (t for node, entry in loaders if (t := read_str(node, entry, "clip_type"))), None
+    )
+    return list(dict.fromkeys(names)), clip_type
+
+
+def _clip_loader(graph: Graph, encoder_id: str) -> tuple[Node, Entry] | None:
+    """The CLIP or checkpoint loader an encoder's `clip` input comes from."""
+    link = graph.nodes[encoder_id].link("clip")
+    return next(
+        (
+            (node, entry)
+            for node in follow(graph, link, "clip")
+            if (entry := REGISTRY.get(node.class_type)) is not None
+            and (
                 entry.role is Role.CLIP_LOADER
                 or (entry.role is Role.MODEL_LOADER and entry.kind == "ckpt")
-            ):
-                for name in entry.names:
-                    value = as_str(node.literal(name))
-                    if value and model_stem(value) not in names:
-                        names.append(model_stem(value))
-                clip_type = clip_type or read_str(node, entry, "clip_type")
-                break
-    return names, clip_type
+            )
+        ),
+        None,
+    )
 
 
 def vae(graph: Graph, reach: Reachability) -> str | None:
@@ -71,18 +81,16 @@ def latent(graph: Graph, primary: StageTrace | None) -> tuple[str | None, int | 
 
 
 def input_images(graph: Graph, reach: Reachability) -> list[InputImage]:
-    images = []
-    for node_id in reach.order:
-        node = graph.nodes[node_id]
-        if role_of(node.class_type) is not Role.IMAGE_INPUT:
-            continue
-        # LoadImage's is_changed holds the SHA-256 of the input file.
-        changed = node.extra.get("is_changed")
-        first = changed[0] if isinstance(changed, list) and changed else None
-        sha256 = first.lower() if isinstance(first, str) and _SHA256.fullmatch(first) else None
-        filename = read_str(node, REGISTRY[node.class_type], "filename")
-        images.append(InputImage(node_id, filename, sha256))
-    return images
+    nodes = (graph.nodes[node_id] for node_id in reach.order)
+    return [_input_image(n) for n in nodes if role_of(n.class_type) is Role.IMAGE_INPUT]
+
+
+def _input_image(node: Node) -> InputImage:
+    # LoadImage's is_changed holds the SHA-256 of the input file.
+    changed = node.extra.get("is_changed")
+    first = changed[0] if isinstance(changed, list) and changed else None
+    sha256 = first.lower() if isinstance(first, str) and _SHA256.fullmatch(first) else None
+    return InputImage(node.id, read_str(node, REGISTRY[node.class_type], "filename"), sha256)
 
 
 def _nearest(graph: Graph, start: str, role: Role) -> Node | None:

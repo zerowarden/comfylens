@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from datetime import date
 from typing import IO, Any, Literal
 
-import xxhash
 from pydantic import BaseModel, Field, ValidationError
 
 from comfylens.collection.drafts import MAX_UPLOAD_BYTES, UnsupportedImage, identify
@@ -29,6 +28,7 @@ from comfylens.collection.models import (
     PromptSettings,
 )
 from comfylens.collection.store import CollectionStore, InvalidInput
+from comfylens.metadata import hash_content
 
 MANIFEST = "comfylens-collection.json"
 FORMAT = "comfylens-collection"
@@ -145,35 +145,9 @@ def import_zip(store: CollectionStore, source: IO[bytes]) -> ImportStats:
     except (zipfile.BadZipFile, OSError) as e:
         raise InvalidArchive("not a zip file") from e
     with z:
-        try:
-            raw = json.loads(_read(z, MANIFEST, MAX_MANIFEST_BYTES))
-        except ValueError as e:
-            raise InvalidArchive("the manifest is not valid JSON") from e
-        if not isinstance(raw, dict) or raw.get("format") != FORMAT:
-            raise InvalidArchive("not a comfylens collection archive")
-        version = raw.get("version")
-        if not isinstance(version, int) or version > VERSION:
-            raise InvalidArchive(
-                f"the archive is version {version}; this comfylens reads up to {VERSION}"
-            )
-        try:
-            manifest = Manifest.model_validate(raw)
-        except ValidationError as e:
-            first = e.errors()[0]
-            where = ".".join(str(p) for p in first["loc"])
-            raise InvalidArchive(f"the manifest is invalid at {where}: {first['msg']}") from e
+        manifest = _manifest(z)
         for o in manifest.originals:
-            data = _read(z, _member(o), MAX_UPLOAD_BYTES)
-            if xxhash.xxh3_128_hexdigest(data) != o.content_hash:
-                raise InvalidArchive(f"{_member(o)} does not match its hash")
-            try:
-                fmt, width, height = identify(data)
-            except UnsupportedImage as e:
-                raise InvalidArchive(f"{_member(o)} is not a PNG, JPEG or WebP image") from e
-            if fmt != o.format:
-                raise InvalidArchive(f"{_member(o)} is not a {o.format.upper()} image")
-            store.write_file(o.content_hash, fmt, data)
-            o.width, o.height, o.size = width, height, len(data)
+            _import_original(z, store, o)
     try:
         added, skipped = store.import_rows(
             [p.model_dump() for p in manifest.prompts],
@@ -182,3 +156,39 @@ def import_zip(store: CollectionStore, source: IO[bytes]) -> ImportStats:
     except InvalidInput as e:
         raise InvalidArchive(f"a prompt in the archive is invalid: {e}") from e
     return ImportStats(added, skipped, len(manifest.originals))
+
+
+def _manifest(z: zipfile.ZipFile) -> Manifest:
+    try:
+        raw = json.loads(_read(z, MANIFEST, MAX_MANIFEST_BYTES))
+    except ValueError as e:
+        raise InvalidArchive("the manifest is not valid JSON") from e
+    if not isinstance(raw, dict) or raw.get("format") != FORMAT:
+        raise InvalidArchive("not a comfylens collection archive")
+    version = raw.get("version")
+    if not isinstance(version, int) or version > VERSION:
+        raise InvalidArchive(
+            f"the archive is version {version}; this comfylens reads up to {VERSION}"
+        )
+    try:
+        return Manifest.model_validate(raw)
+    except ValidationError as e:
+        first = e.errors()[0]
+        where = ".".join(str(p) for p in first["loc"])
+        raise InvalidArchive(f"the manifest is invalid at {where}: {first['msg']}") from e
+
+
+def _import_original(z: zipfile.ZipFile, store: CollectionStore, o: ArchiveOriginal) -> None:
+    """Check an image against its manifest entry, store it, and fill in its true size."""
+    member = _member(o)
+    data = _read(z, member, MAX_UPLOAD_BYTES)
+    if hash_content(data) != o.content_hash:
+        raise InvalidArchive(f"{member} does not match its hash")
+    try:
+        fmt, width, height = identify(data)
+    except UnsupportedImage as e:
+        raise InvalidArchive(f"{member} is not a PNG, JPEG or WebP image") from e
+    if fmt != o.format:
+        raise InvalidArchive(f"{member} is not a {o.format.upper()} image")
+    store.write_file(o.content_hash, fmt, data)
+    o.width, o.height, o.size = width, height, len(data)

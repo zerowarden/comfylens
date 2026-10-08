@@ -4,8 +4,7 @@ from dataclasses import dataclass, field
 from comfylens.extract.registry import REGISTRY, Entry, Role, role_of
 from comfylens.extract.types import SamplerStage
 from comfylens.extract.values import as_int, number, read_float, read_int, read_str
-from comfylens.graph.model import Graph, Link, Node
-from comfylens.graph.reachability import Reachability, upstream
+from comfylens.graph import Graph, Link, Node, Reachability, upstream
 
 # Satellite link of SamplerCustom* -> the role its source should have.
 _SATELLITES = {

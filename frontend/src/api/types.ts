@@ -4,8 +4,7 @@ export type Status = "ok" | "partial" | "no_metadata" | "error";
 export type SortKey = "generated_at" | "rel_path" | "family" | "steps" | "cfg";
 export type NumericFilterField = "steps" | "cfg" | "denoise" | "guidance" | "shift";
 export type Bucket = "day" | "week" | "month";
-export type Section = "numeric" | "categorical" | "seeds" | "loras" | "graph" | "configs";
-export type GenericKind = "num" | "str" | "bool" | "json";
+export type Section = "numeric" | "categorical" | "seeds" | "loras" | "configs";
 export type ImageRole = "reference" | "attempt";
 export type DraftMetadata = "comfyui" | "a1111" | "none";
 /** LoraKey in src/comfylens/analytics/loras.py: group LoRAs by file name or base name. */
@@ -19,6 +18,7 @@ export interface LoraFilter {
 }
 
 export interface Filters {
+  tags: string[]; // files holding any of them
   families: string[];
   base_models: string[];
   samplers: string[];
@@ -29,7 +29,6 @@ export interface Filters {
   statuses: Status[];
   text: string;
   numeric: Partial<Record<NumericFilterField, [number, number]>>;
-  has_warnings: boolean | null;
   saved: boolean | null; // linked to any saved prompt (or to none)
   saved_prompt: number | null; // one saved prompt's files: linked, or the same prompt
   sentences: string[]; // similar-sentence cluster: the member sentence hashes (16 hex digits)
@@ -48,14 +47,23 @@ export interface ScopeInfo {
   analyzed: number;
 }
 
+export interface FixSummary {
+  fixed: number; // files rewritten
+  first_failure: string | null; // "path: reason"
+  failed: number;
+  error: string | null; // the run itself failed: nothing more was fixed
+  finished_at: number;
+}
+
 export interface IndexStatusModel {
-  state: "idle" | "scanning" | "processing" | "finalizing";
+  state: "idle" | "fixing" | "scanning" | "processing" | "finalizing";
   total: number;
   done: number;
   errors: number;
   started_at: number | null;
   last_error: string | null;
   last_finished_at: number | null;
+  last_fix: FixSummary | null; // the last Fix run since the server started
 }
 
 export interface Versions {
@@ -96,6 +104,7 @@ export interface DateRange {
 }
 
 export interface Facets {
+  tags: FacetValue[];
   families: FacetValue[];
   base_models: FacetValue[];
   samplers: FacetValue[];
@@ -124,12 +133,11 @@ export interface ImageItem {
   rel_path: string;
   width: number | null;
   height: number | null;
-  family: string | null;
   generated_at: number | null;
   status: Status;
-  has_warnings: boolean;
   timestamp_suspect: boolean;
   saved: boolean; // linked to a saved prompt in the collection
+  tags: string[];
 }
 
 export interface ImagesPage {
@@ -161,14 +169,30 @@ export interface TrashRequest {
   ids: number[]; // 1 to TRASH_BATCH
 }
 
-export interface TrashFailure {
+export interface FileFailure {
   id: number;
   message: string;
 }
 
 export interface TrashResponse {
   trashed: number[]; // moved to the system trash, or already gone; no longer in the catalog
-  failed: TrashFailure[];
+  failed: FileFailure[];
+}
+
+export interface TagRequest {
+  ids: number[]; // 1 to TRASH_BATCH
+  add: string[]; // 1 to 64 characters each, no control characters
+  remove: string[];
+}
+
+export interface TaggedImage {
+  id: number;
+  tags: string[]; // after the edit, sorted
+}
+
+export interface TagResponse {
+  tagged: TaggedImage[]; // every file that did not fail, changed or not
+  failed: FileFailure[];
 }
 
 export interface DetailFile {
@@ -186,6 +210,7 @@ export interface DetailFile {
   timestamp_suspect: boolean;
   status: Status;
   error: string | null;
+  tags: string[];
 }
 
 export interface DetailGeneration {
@@ -358,27 +383,6 @@ export interface LoraRow {
   steps: IntCount[] | null;
 }
 
-export interface LoraNode {
-  name: string;
-  images: number;
-  /** Median strength_model over the LoRA's uses. */
-  median: number | null;
-}
-
-export interface LoraLink {
-  source: string;
-  target: string;
-  /** Images that use both LoRAs. */
-  images: number;
-}
-
-export interface LoraGraph {
-  /** The top_n most-used LoRAs. */
-  nodes: LoraNode[];
-  /** Strongest co-occurrences, capped. */
-  links: LoraLink[];
-}
-
 export interface ConfigRow {
   key: string;
   count: number;
@@ -395,7 +399,6 @@ export interface FamilyStats {
   categorical: Record<string, Categorical> | null;
   seeds: SeedStats | null;
   loras: LoraRow[] | null;
-  graph: LoraGraph | null;
   configs: ConfigRow[] | null;
 }
 
@@ -531,39 +534,6 @@ export interface DistinctiveResponse {
   scope: ScopeInfo;
   side: PromptSide;
   groups: DistinctiveGroup[];
-}
-
-export interface NodeInputKey {
-  class_type: string;
-  input_name: string;
-  kind: GenericKind;
-  files: number;
-}
-
-export interface NodeKeysResponse {
-  scope: ScopeInfo;
-  keys: NodeInputKey[];
-}
-
-export interface NodeStatsRequest extends Scope {
-  class_type: string;
-  input_name: string;
-}
-
-export interface NodeStatsGroup {
-  family: string;
-  files: number;
-  kind: GenericKind;
-  numeric: NumericStats | null;
-  categorical: Categorical | null;
-  n_unique: number | null;
-}
-
-export interface NodeStatsResponse {
-  scope: ScopeInfo;
-  class_type: string;
-  input_name: string;
-  groups: NodeStatsGroup[];
 }
 
 export interface SavedLora {

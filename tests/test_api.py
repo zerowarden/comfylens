@@ -82,7 +82,7 @@ def test_images_query_sort_and_page(client: TestClient):
     assert page["total"] == 7
     assert [i["rel_path"] for i in page["items"]] == ["plain.png", "owl.png"]  # newest first
     item = page["items"][1]
-    assert item["family"] == "flux" and item["status"] == "ok" and not item["timestamp_suspect"]
+    assert item["status"] == "ok" and item["tags"] == [] and not item["timestamp_suspect"]
     second = client.post("/api/images/query", json={"limit": 2, "offset": 2}).json()
     assert [i["rel_path"] for i in second["items"]] == ["fox3.png", "fox2.png"]
     by_path = client.post(
@@ -107,9 +107,6 @@ def test_filters(client: TestClient):
     assert total({"numeric": {"cfg": [3.0, 4.0]}}) == 4
     assert total({"date_from": "2026-09-24", "date_to": "2026-09-24"}) == 2
     assert total({"statuses": ["no_metadata"]}) == 1
-    # The goldens' only warning, UNUSED_LORA, is informational: no badge, no filter match.
-    assert total({"has_warnings": True}) == 0
-    assert total({"has_warnings": False}) == 7
 
 
 def test_stats_scope_kinds_and_dedupe(client: TestClient):
@@ -143,6 +140,7 @@ def test_stats_sections(client: TestClient):
         {"value": "euler", "count": 4, "share": 1.0}
     ]
     assert flux["categorical"]["vae"]["values"][0]["value"] == "ae"
+    assert flux["categorical"]["tags"] == {"n": 0, "values": [], "other": 0, "missing": 0}
     assert flux["seeds"] == {"n": 4, "n_unique": 4, "repeated": []}
     (fox,) = flux["loras"]
     # Strength statistics cover the 3 users only, not the owl at strength "zero".
@@ -151,21 +149,7 @@ def test_stats_sections(client: TestClient):
     assert fox["strength_model"]["mean"] == pytest.approx(0.8666666)
     assert fox["positions"] == [{"value": 0, "count": 3}]
     assert flux["configs"][0]["fields"]["lora_stack_key"] == "fox@0.8"
-    # The co-occurrence graph: fox alone has no links; the golden chain links its two LoRAs.
-    assert {"name": "fox", "images": 3, "median": 0.8} in flux["graph"]["nodes"]
-    assert flux["graph"]["links"] == []
     assert qwen["loras"][0]["name"] == "qwen2.1-anime2real-sunburst"
-    assert qwen["graph"]["nodes"] == [
-        {"name": "qwen2.1-anime2real-sunburst", "images": 1, "median": 1.13},
-        {"name": "qwen2.1-lenovo-ultrareal", "images": 1, "median": 1.06},
-    ]
-    assert qwen["graph"]["links"] == [
-        {
-            "source": "qwen2.1-anime2real-sunburst",
-            "target": "qwen2.1-lenovo-ultrareal",
-            "images": 1,
-        }
-    ]
 
 
 def test_stats_base_name(client: TestClient):
@@ -255,27 +239,6 @@ def test_prompts_warming(client: TestClient):
         assert r.json()["warming"] is True and r.json()["error"]["code"] == "warming"
     finally:
         snap.prompts = frames
-
-
-def test_node_inputs(client: TestClient):
-    keys = client.post("/api/node-inputs/keys", json={}).json()["keys"]
-    assert {"class_type": "KSampler", "input_name": "seed", "kind": "num", "files": 5} in keys
-    stats = client.post(
-        "/api/node-inputs/stats", json={"class_type": "KSampler", "input_name": "cfg"}
-    ).json()
-    assert [(g["family"], g["kind"], g["numeric"]["mode"]) for g in stats["groups"]] == [
-        ("flux", "num", [3.5]),
-        ("qwen-image-2.1", "num", [2.0]),
-    ]
-    text = client.post(
-        "/api/node-inputs/stats", json={"class_type": "VAELoader", "input_name": "vae_name"}
-    ).json()
-    assert text["groups"][0]["categorical"]["values"][0]["value"] == "ae.safetensors"
-    long = client.post(
-        "/api/node-inputs/stats",
-        json={"class_type": "TextEncodeQwenImage21", "input_name": "prompt"},
-    ).json()
-    assert long["groups"][0]["n_unique"] == 1  # longer than 200 characters
 
 
 def test_detail_of_the_reference_file(client: TestClient):
@@ -433,6 +396,8 @@ def test_unknown_host_header_is_rejected(client: TestClient):
     # DNS rebinding: another site's host name must not reach the library.
     assert client.get("/api/library", headers={"Host": "evil.example"}).status_code == 400
     assert client.get("/api/library", headers={"Host": "localhost:8765"}).status_code == 200
+    # The container's mDNS name and a configured extra host name are allowed.
+    assert client.get("/api/library", headers={"Host": "comfylens.local"}).status_code == 200
 
 
 def test_rescan_picks_up_a_new_file(client: TestClient, library: Path):

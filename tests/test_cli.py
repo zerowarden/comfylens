@@ -155,6 +155,40 @@ def test_serve_takes_the_next_free_port(tmp_path: Path, monkeypatch):
     assert bound[0] != port and int(free.output) != port
 
 
+def test_serve_reads_the_scan_directory_from_the_rc_file(tmp_path: Path, monkeypatch):
+    import uvicorn
+
+    library = tmp_path / "lib"
+    library.mkdir()
+    rc = tmp_path / ".comfylensrc"
+    rc.write_text(f'[scan]\ndirectory = "{library}"\n', encoding="utf-8")
+    served = []
+
+    class FakeServer:
+        started = False
+        should_exit = True
+
+        def __init__(self, config):
+            pass
+
+        def run(self, sockets):
+            served.append(sockets[0].getsockname()[1])
+            sockets[0].close()
+
+    monkeypatch.setattr(uvicorn, "Server", FakeServer)
+    result = runner.invoke(app, ["serve", "--no-open", "--no-index"], env={"COMFYLENS_RC": str(rc)})
+    assert result.exit_code == 0, result.output
+    assert len(served) == 1
+
+
+def test_serve_without_library_or_rc_file_fails(tmp_path: Path):
+    result = runner.invoke(
+        app, ["serve", "--no-open", "--no-index"], env={"COMFYLENS_RC": str(tmp_path / "missing")}
+    )
+    assert result.exit_code == 2
+    assert "no configuration file" in result.output
+
+
 def test_collection_export_and_import(tmp_path: Path):
     from datetime import date
 

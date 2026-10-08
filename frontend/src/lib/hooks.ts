@@ -40,8 +40,39 @@ export function useElementWidth(element: HTMLElement | null): number {
   return width;
 }
 
+/**
+ * Put `text` on the clipboard. The Clipboard API needs a secure context, so plain-HTTP origins
+ * (the container's http://comfylens.local) fall back to a hidden field and `execCommand`.
+ */
 export async function copyText(text: string): Promise<void> {
-  await navigator.clipboard.writeText(text);
+  if (navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Denied, unfocused or blocked by policy: the legacy path may still work.
+    }
+  }
+  if (!copyWithField(text)) throw new Error("Could not copy to the clipboard");
+}
+
+/** The pre-Clipboard-API path: an off-screen field, selected, with one `execCommand` call. */
+function copyWithField(text: string): boolean {
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  // Off screen but still selectable; `display: none` cannot be selected.
+  field.style.position = "fixed";
+  field.style.left = "-9999px";
+  document.body.append(field);
+  try {
+    field.select();
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+  }
 }
 
 /**

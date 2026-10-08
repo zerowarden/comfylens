@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ScopeInfo } from "../api/types";
-import { fmtNum, scopeParts, scopeSentence } from "./format";
+import { fmtNum, fractionOf, isSingleSelection, scopeParts, scopeSentence } from "./format";
 
 const scope = (over: Partial<ScopeInfo>): ScopeInfo => ({
   scope_kind: "all",
@@ -63,5 +63,20 @@ describe("fmtNum", () => {
     expect(fmtNum(2)).toBe("2");
     expect(fmtNum(1.46234)).toBe("1.4623");
     expect(fmtNum(null)).toBe("—");
+  });
+});
+
+describe("isSingleSelection", () => {
+  it("is true only for exactly one selected image", () => {
+    expect(isSingleSelection(scope({ scope_kind: "selection", scope_size: 1 }))).toBe(true);
+    expect(isSingleSelection(scope({ scope_kind: "selection", scope_size: 2 }))).toBe(false);
+    expect(isSingleSelection(scope({ scope_kind: "filtered", scope_size: 1 }))).toBe(false);
+    expect(isSingleSelection(scope({ scope_kind: "all", scope_size: 1 }))).toBe(false);
+  });
+});
+
+describe("fractionOf", () => {
+  it("places a value between two ends, and an empty span at its start", () => {
+    expect([fractionOf(5, 0, 10), fractionOf(0, 0, 10), fractionOf(3, 3, 3)]).toEqual([0.5, 0, 0]);
   });
 });

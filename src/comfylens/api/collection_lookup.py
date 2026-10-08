@@ -7,11 +7,10 @@ import sqlite3
 
 import polars as pl
 
-from comfylens.analytics.collection import hash_matches, keyed_files, library_counts
-from comfylens.analytics.snapshot import Snapshot
+from comfylens.analytics import Snapshot, hash_matches, keyed_files, library_counts
 from comfylens.api.errors import ApiError
 from comfylens.api.server_base import CACHE_SIZE, _ServerBase
-from comfylens.extract.normalize import prompt_key
+from comfylens.extract import prompt_key
 
 
 class CollectionLookupMixin(_ServerBase):

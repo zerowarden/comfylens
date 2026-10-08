@@ -27,6 +27,7 @@ class ServerConfig:
     host: str
     port: int
     open_browser: bool
+    allowed_hosts: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -199,10 +200,42 @@ def _require(condition: bool, message: str) -> None:
 
 
 def _build(m: dict[str, Any]) -> Config:
-    server = ServerConfig(**m["server"])
-    _require(1 <= server.port <= 65535, "server.port must be between 1 and 65535")
+    server = _server(m["server"])
+    index = _index(m["index"])
+    thumbs = _thumbs(m["thumbs"])
+    analysis = _analysis(m["analysis"])
+    prompts = _prompts(m["prompts"])
+    timestamps = _timestamps(m["timestamps"])
+    lora = _lora(m["lora"])
+    graph = _graph(m["graph"])
+    families = tuple(_family(n, rule) for n, rule in enumerate(m["families"]))
 
-    i = m["index"]
+    hashed = {
+        "graph": m["graph"],
+        "lora": m["lora"],
+        "families": m["families"],
+        # Stored lora_stack_key and config_key depend on it.
+        "config_round_decimals": analysis.config_round_decimals,
+    }
+    config_hash = xxhash.xxh3_64_hexdigest(json.dumps(hashed, sort_keys=True).encode())
+
+    return Config(
+        server, index, thumbs, analysis, prompts, timestamps, lora, graph, families, config_hash
+    )
+
+
+def _server(s: dict[str, Any]) -> ServerConfig:
+    server = ServerConfig(
+        host=s["host"],
+        port=s["port"],
+        open_browser=s["open_browser"],
+        allowed_hosts=_strings("server.allowed_hosts", s["allowed_hosts"]),
+    )
+    _require(1 <= server.port <= 65535, "server.port must be between 1 and 65535")
+    return server
+
+
+def _index(i: dict[str, Any]) -> IndexConfig:
     index = IndexConfig(
         extensions=tuple(e.lower() for e in _strings("index.extensions", i["extensions"])),
         exclude_globs=_strings("index.exclude_globs", i["exclude_globs"]),
@@ -212,24 +245,35 @@ def _build(m: dict[str, Any]) -> Config:
     )
     _require(index.workers >= 0, "index.workers must be >= 0")
     _require(index.batch_size >= 1, "index.batch_size must be >= 1")
+    return index
 
-    thumbs = ThumbsConfig(**m["thumbs"])
+
+def _thumbs(t: dict[str, Any]) -> ThumbsConfig:
+    thumbs = ThumbsConfig(**t)
     _require(thumbs.long_edge >= 16, "thumbs.long_edge must be >= 16")
     _require(0 <= thumbs.quality <= 100, "thumbs.quality must be between 0 and 100")
+    return thumbs
 
-    analysis = AnalysisConfig(**m["analysis"])
+
+def _analysis(a: dict[str, Any]) -> AnalysisConfig:
+    analysis = AnalysisConfig(**a)
     _require(analysis.round_decimals >= 0, "analysis.round_decimals must be >= 0")
     _require(analysis.config_round_decimals >= 0, "analysis.config_round_decimals must be >= 0")
+    return analysis
 
-    prompts = PromptsConfig(**m["prompts"])
+
+def _prompts(p: dict[str, Any]) -> PromptsConfig:
+    prompts = PromptsConfig(**p)
     _require(0 < prompts.template_threshold <= 1, "prompts.template_threshold must be in (0, 1]")
     _require(prompts.distinctive_alpha0 > 0, "prompts.distinctive_alpha0 must be > 0")
     _require(
         0 < prompts.cluster_similarity <= 1,
         "prompts.cluster_similarity must be in (0, 1]",
     )
+    return prompts
 
-    t = m["timestamps"]
+
+def _timestamps(t: dict[str, Any]) -> TimestampsConfig:
     _require(
         t["source"] in ("mtime", "filename"), 'timestamps.source must be "mtime" or "filename"'
     )
@@ -244,39 +288,27 @@ def _build(m: dict[str, Any]) -> Config:
         _require("ts" in regex.groupindex, f"{name}.regex needs a named group 'ts'")
         _require(isinstance(entry["format"], str), f"{name}.format must be a string")
         patterns.append(FilenamePattern(regex, entry["format"]))
-    timestamps = TimestampsConfig(
+    return TimestampsConfig(
         source=t["source"],
         filename_patterns=tuple(patterns),
         burst_window_seconds=t["burst_window_seconds"],
         burst_min_distinct=t["burst_min_distinct"],
     )
 
-    step_regex = _regex("lora.step_suffix_regex", m["lora"]["step_suffix_regex"])
+
+def _lora(lora: dict[str, Any]) -> LoraConfig:
+    step_regex = _regex("lora.step_suffix_regex", lora["step_suffix_regex"])
     _require(
         {"base", "step"} <= set(step_regex.groupindex),
         "lora.step_suffix_regex needs named groups 'base' and 'step'",
     )
-    lora = LoraConfig(step_regex)
+    return LoraConfig(step_regex)
 
-    g = m["graph"]
-    graph = GraphConfig(
+
+def _graph(g: dict[str, Any]) -> GraphConfig:
+    return GraphConfig(
         output_classes=frozenset(_strings("graph.output_classes", g["output_classes"])),
         output_name_regex=_regex("graph.output_name_regex", g["output_name_regex"]),
-    )
-
-    families = tuple(_family(n, rule) for n, rule in enumerate(m["families"]))
-
-    hashed = {
-        "graph": m["graph"],
-        "lora": m["lora"],
-        "families": m["families"],
-        # Stored lora_stack_key and config_key depend on it.
-        "config_round_decimals": analysis.config_round_decimals,
-    }
-    config_hash = xxhash.xxh3_64_hexdigest(json.dumps(hashed, sort_keys=True).encode())
-
-    return Config(
-        server, index, thumbs, analysis, prompts, timestamps, lora, graph, families, config_hash
     )
 
 

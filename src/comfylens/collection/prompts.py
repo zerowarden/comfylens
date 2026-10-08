@@ -16,8 +16,8 @@ from comfylens.collection.store_base import (
     key_hex,
     normalize_tags,
 )
-from comfylens.db.connection import transaction
-from comfylens.extract.normalize import prompt_key
+from comfylens.db import transaction
+from comfylens.extract import prompt_key
 
 
 class PromptsMixin(_StoreBase):
@@ -157,6 +157,24 @@ class PromptsMixin(_StoreBase):
                 conn.execute("UPDATE prompts SET updated_at = ? WHERE id = ?", (_now(), prompt_id))
                 self._bump(conn)
         return added
+
+    def rehash_attempts(self, renamed: dict[str, str], keep: set[str]) -> None:
+        """Follow library files whose content hash changed: each attempt link to an old hash
+        gains its new one, and loses the old one unless a file in `keep` still has it."""
+        if not renamed:
+            return
+        with self._connect() as conn, transaction(conn):
+            conn.executemany(
+                "INSERT OR IGNORE INTO prompt_images (prompt_id, content_hash, role, position,"
+                " added_at) SELECT prompt_id, ?, role, position, added_at FROM prompt_images"
+                " WHERE content_hash = ? AND role = 'attempt'",
+                [(new, old) for old, new in renamed.items()],
+            )
+            conn.executemany(
+                "DELETE FROM prompt_images WHERE content_hash = ? AND role = 'attempt'",
+                [(old,) for old in renamed if old not in keep],
+            )
+            self._bump(conn)
 
     def unlink_attempts(self, prompt_id: int, hashes: list[str]) -> bool:
         """Remove attempt links (references stay); False if the prompt is unknown."""

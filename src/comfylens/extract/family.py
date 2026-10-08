@@ -16,17 +16,19 @@ def match_family(
     class_types: Collection[str],  # every reachable class_type
 ) -> str:
     def matches(c: FamilyCondition) -> bool:
-        # Every key set on a condition must match.
-        checks = []
-        if c.unet_regex is not None:
-            checks.append(loader_kind == "unet" and bool(c.unet_regex.search(loader_name or "")))
-        if c.ckpt_regex is not None:
-            checks.append(loader_kind == "ckpt" and bool(c.ckpt_regex.search(loader_name or "")))
-        if c.clip_type is not None:
-            checks.append(clip_type == c.clip_type)
-        if c.class_regex is not None:
-            regex = c.class_regex
-            checks.append(any(regex.search(t) for t in class_types))
-        return bool(checks) and all(checks)
+        # Every key set on a condition must match; an unset key gives None here.
+        loader = loader_name or ""
+        checks = [
+            None
+            if (u := c.unet_regex) is None
+            else loader_kind == "unet" and bool(u.search(loader)),
+            None
+            if (k := c.ckpt_regex) is None
+            else loader_kind == "ckpt" and bool(k.search(loader)),
+            None if c.clip_type is None else clip_type == c.clip_type,
+            None if (r := c.class_regex) is None else any(r.search(t) for t in class_types),
+        ]
+        keys = [check for check in checks if check is not None]
+        return bool(keys) and all(keys)
 
     return next((rule.name for rule in rules if any(map(matches, rule.any))), UNKNOWN)

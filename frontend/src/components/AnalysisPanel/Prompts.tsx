@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import type { PromptBy, PromptCluster, PromptGroup, PromptSide, TermRow } from "../../api/types";
-import { fmtInt, fmtPct, loadingText } from "../../lib/format";
+import { fmtInt, fmtPct, isSingleSelection, loadingText } from "../../lib/format";
 import { useFilters } from "../../state/filters";
 import {
   Button,
@@ -13,6 +13,7 @@ import {
   ShowAllToggle,
   td,
 } from "../ui";
+import { PromptBox } from "../Viewer";
 import { WARMING_TEXT } from "../../api/client";
 import { isWarming, promptStatus, useDistinctive, usePrompts } from "./data";
 import Distinctive from "./Distinctive";
@@ -154,6 +155,20 @@ function Group({ group, distinctive }: { group: PromptGroup; distinctive: ReactN
   );
 }
 
+/** The prompts themselves, without term statistics: the single-image view. */
+function PromptValues({ groups, side }: { groups: PromptGroup[]; side: PromptSide }) {
+  const label = side === "positive" ? "Positive prompt" : "Negative prompt";
+  const prompts = [...new Set(groups.flatMap((g) => g.distinct.map((p) => p.text)))];
+  if (prompts.length === 0) return <Message>No {side} prompt on the selected image.</Message>;
+  return (
+    <div className="space-y-3 p-3">
+      {prompts.map((text, i) => (
+        <PromptBox key={i} label={label} text={text} />
+      ))}
+    </div>
+  );
+}
+
 export default function Prompts() {
   const [side, setSide] = useState<PromptSide>("positive");
   const [includeTemplate, setIncludeTemplate] = useState(false);
@@ -171,6 +186,24 @@ export default function Prompts() {
         status={distinctiveStatus}
       />
     ) : null;
+
+  if (query.data && isSingleSelection(query.data.scope)) {
+    return (
+      <div>
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+          <Segmented
+            value={side}
+            options={[
+              { value: "positive", label: "Positive" },
+              { value: "negative", label: "Negative" },
+            ]}
+            onChange={setSide}
+          />
+        </div>
+        <PromptValues groups={query.data.groups} side={side} />
+      </div>
+    );
+  }
 
   return (
     <div>

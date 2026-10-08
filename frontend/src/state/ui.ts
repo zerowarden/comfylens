@@ -2,8 +2,8 @@ import { create } from "zustand";
 
 import { initialViewState, type View } from "../lib/viewHash";
 
-export type Tab = "overview" | "loras" | "configs" | "prompts" | "resolution" | "advanced";
-export type Theme = "dark" | "light";
+export type Tab = "overview" | "tags" | "loras" | "configs" | "prompts" | "resolution";
+type Theme = "dark" | "light";
 
 function stored<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
   try {
@@ -61,8 +61,8 @@ interface UiStore {
 
 export const TILE_MIN = 96;
 export const TILE_MAX = 320;
-export const PANEL_MIN = 320;
-export const PANEL_MAX = 900;
+const PANEL_MIN = 320;
+const PANEL_MAX = 900;
 
 function clampPanel(width: number): number {
   return Math.min(PANEL_MAX, Math.max(PANEL_MIN, width));

@@ -1,5 +1,6 @@
 """Data passed from the format readers to blob classification."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -12,6 +13,20 @@ Kind = Literal["api_prompt", "workflow", "a1111", "json", "text", "oversized"]
 
 # Metadata is untrusted: larger payloads are never inflated or parsed.
 MAX_TEXT_BYTES = 50 * 1024 * 1024
+
+
+class Truncated(ValueError):
+    """The data ends, or stops making sense, inside a chunk or segment or before the image end."""
+
+
+def until_truncated[T](items: Iterable[T]) -> tuple[list[T], bool]:
+    """The items read before a Truncated, and whether one was raised."""
+    read: list[T] = []
+    try:
+        read.extend(items)  # appends one by one: what came before the error stays
+    except Truncated:
+        return read, True
+    return read, False
 
 
 def is_api_node(value: Any) -> bool:
@@ -37,8 +52,9 @@ class Scan:
     format: Format
     width: int
     height: int
-    hits: list[TextHit] = field(default_factory=list)
+    hits: list[TextHit] = field(default_factory=list)  # comfylens's own XMP packet excluded
     warnings: list[Warn] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)  # from comfylens's own XMP packet
 
 
 @dataclass(slots=True)
@@ -54,6 +70,7 @@ class RawMetadata:
     workflow_key: str | None
     workflow: dict[str, Any] | None
     warnings: list[Warn]
+    tags: list[str]
 
     @property
     def status(self) -> Status:

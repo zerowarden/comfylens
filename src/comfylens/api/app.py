@@ -1,6 +1,6 @@
 """The FastAPI application: JSON API, thumbnails and the built frontend."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,10 +19,10 @@ from comfylens.api import (
     routes_stats,
 )
 from comfylens.api.errors import ApiError, error_response
-from comfylens.api.server import ALLOWED_HOSTS, Server
+from comfylens.api.server import Server
 from comfylens.config import Config
-from comfylens.extract.pipeline import describe
-from comfylens.index.watch import DEBOUNCE_MS
+from comfylens.extract import describe
+from comfylens.index import DEBOUNCE_MS
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -51,31 +51,10 @@ def create_app(
 
     # Responses go straight through Pydantic, which writes NaN (ComfyUI can emit it) as null.
     app = FastAPI(title="comfylens", lifespan=lifespan, docs_url=None)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(ALLOWED_HOSTS))
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(config.server.allowed_hosts))
     app.state.server = server
-
-    @app.exception_handler(ApiError)
-    async def _api_error(_request: Request, e: ApiError) -> JSONResponse:
-        return error_response(e.status, e.code, e.message)
-
-    @app.exception_handler(StarletteHTTPException)
-    async def _http_error(_request: Request, e: StarletteHTTPException) -> JSONResponse:
-        # A wrong method on a known path is served as an unknown endpoint (404), not 405.
-        status = 404 if e.status_code == 405 else e.status_code
-        code = {404: "not_found"}.get(status, "http_error")
-        return error_response(status, code, str(e.detail))
-
-    @app.exception_handler(RequestValidationError)
-    async def _invalid(_request: Request, e: RequestValidationError) -> JSONResponse:
-        problems = "; ".join(
-            f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()
-        )
-        return error_response(400, "invalid_request", problems)
-
-    @app.exception_handler(Exception)
-    async def _internal(_request: Request, e: Exception) -> JSONResponse:
-        return error_response(500, "internal", describe(e))
-
+    for error, handler in _ERROR_HANDLERS.items():
+        app.add_exception_handler(error, handler)
     for module in (
         routes_library,
         routes_index,
@@ -86,9 +65,38 @@ def create_app(
     ):
         app.include_router(module.router)
     app.include_router(routes_images.thumbs_router)
-
     _mount_frontend(app, web_dir)
     return app
+
+
+async def _api_error(_request: Request, e: ApiError) -> JSONResponse:
+    return error_response(e.status, e.code, e.message)
+
+
+async def _http_error(_request: Request, e: StarletteHTTPException) -> JSONResponse:
+    # A wrong method on a known path is served as an unknown endpoint (404), not 405.
+    status = 404 if e.status_code == 405 else e.status_code
+    code = {404: "not_found"}.get(status, "http_error")
+    return error_response(status, code, str(e.detail))
+
+
+async def _invalid(_request: Request, e: RequestValidationError) -> JSONResponse:
+    problems = "; ".join(
+        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()
+    )
+    return error_response(400, "invalid_request", problems)
+
+
+async def _internal(_request: Request, e: Exception) -> JSONResponse:
+    return error_response(500, "internal", describe(e))
+
+
+_ERROR_HANDLERS: dict[type[Exception], Callable[..., Awaitable[JSONResponse]]] = {
+    ApiError: _api_error,
+    StarletteHTTPException: _http_error,
+    RequestValidationError: _invalid,
+    Exception: _internal,
+}
 
 
 def _mount_frontend(app: FastAPI, web_dir: Path | None) -> None:
@@ -102,7 +110,7 @@ def _mount_frontend(app: FastAPI, web_dir: Path | None) -> None:
         if web_dir is None or index is None or not index.is_file():
             return HTMLResponse(
                 "<h1>comfylens</h1><p>The frontend is not built. Run "
-                "<code>npm --prefix frontend install && npm --prefix frontend run build</code>.</p>"
+                "<code>pnpm --dir frontend install && pnpm --dir frontend run build</code>.</p>"
             )
         candidate = (web_dir / path).resolve()
         if path and candidate.is_file() and candidate.is_relative_to(web_dir.resolve()):

@@ -4,6 +4,9 @@ import json
 import sqlite3
 import threading
 import time
+from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -11,25 +14,29 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
-from comfylens.analytics.snapshot import Snapshot, SnapshotStore, apply_removal, apply_rename
+from comfylens.analytics import (
+    Snapshot,
+    SnapshotStore,
+    apply_removal,
+    apply_rename,
+    apply_tags,
+)
 from comfylens.api.collection_lookup import CollectionLookupMixin
 from comfylens.api.errors import ApiError, no_catalog
 from comfylens.api.search import SearchMixin
-from comfylens.collection.store import CollectionStore, CollectionUnavailable
+from comfylens.collection import CollectionStore, CollectionUnavailable
 from comfylens.config import Config
-from comfylens.db.connection import connect
-from comfylens.index import file_ops
-from comfylens.index.indexer import Indexer
-from comfylens.index.watch import DEBOUNCE_MS, LibraryWatcher
-from comfylens.paths import catalog_path, collection_dir
+from comfylens.db import connect
+from comfylens.index import DEBOUNCE_MS, Indexer, IndexLock, LibraryWatcher, file_ops, fixer
+from comfylens.paths import catalog_path, collection_dir, lock_path
 
 # An edit waits this long for the indexer's current transaction (an FTS rebuild of a large
 # library takes seconds) before it gives up as busy.
 _EDIT_BUSY_TIMEOUT = 30.0
 
-# Only these Host headers are served: without the check, a malicious page could reach the
-# loopback server through DNS rebinding. "testserver" is Starlette's TestClient default.
-ALLOWED_HOSTS = ("localhost", "127.0.0.1", "testserver")
+# Only the Host headers in server.allowed_hosts are served: without the check, a malicious
+# page could reach the loopback server through DNS rebinding. "testserver" is Starlette's
+# TestClient default; "comfylens.local" is the container's mDNS name.
 
 
 def stored_json(text: str | None) -> Any:
@@ -43,6 +50,17 @@ MEDIA_TYPES = {"png": "image/png", "jpeg": "image/jpeg", "webp": "image/webp"}
 IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
+@dataclass(frozen=True, slots=True)
+class FixSummary:
+    """The last Fix run, for the UI's notice once it lands."""
+
+    fixed: int  # files rewritten
+    first_failure: str | None  # "path: reason"
+    failed: int
+    error: str | None  # the run itself failed: nothing more was fixed
+    finished_at: float = field(default_factory=time.time)
+
+
 class Server(SearchMixin, CollectionLookupMixin):
     def __init__(self, root: Path, config: Config) -> None:
         self.root = root.resolve()
@@ -51,6 +69,7 @@ class Server(SearchMixin, CollectionLookupMixin):
         self.store = SnapshotStore(self.catalog, config)
         self.indexer = Indexer(self.root, config)
         self.last_error: str | None = None
+        self.last_fix: FixSummary | None = None
         self.last_finished_at: float | None = None
         self.rebuilding = False  # swapping in the snapshot after a run
         self.watcher: LibraryWatcher | None = None
@@ -97,20 +116,63 @@ class Server(SearchMixin, CollectionLookupMixin):
         self.start_index()
 
     def start_index(self) -> bool:
-        """Start an incremental index in a background thread; False if one is running."""
+        """Start an incremental index in a background thread; False if a run is under way."""
+        return self._start(self._index)
+
+    def start_fix(self) -> bool:
+        """Fix the library's files in a background thread, then index the ones that changed;
+        False if a run is under way."""
+        return self._start(self._fix)
+
+    def _start(self, target: Callable[[], None]) -> bool:
         with self._lock:
             if self.indexing:
                 return False
-            self._thread = threading.Thread(target=self._index, name="indexer", daemon=True)
+            self._thread = threading.Thread(target=target, name="indexer", daemon=True)
             self._thread.start()
             return True
 
-    def _index(self) -> None:
+    def _fix(self) -> None:
+        started = time.time()
+        changed: list[str] = []
+        try:
+            fixed = self._fix_files(started)
+            changed = list(fixed.changed)
+            if self.collection is not None:  # saved prompts follow their attempts' new hashes
+                renamed = dict(fixed.changed.values())
+                self.collection.rehash_attempts(renamed, fixed.kept_hashes)
+            self.last_fix = FixSummary(
+                fixed=len(changed),
+                first_failure=next(iter(fixed.failed), None),
+                failed=len(fixed.failed),
+                error=None,
+            )
+        except Exception as e:  # IndexLocked, no catalog, a busy collection, or a bug
+            self.last_fix = FixSummary(
+                fixed=len(changed), first_failure=None, failed=0, error=str(e)
+            )
+        self._index(reread=changed)
+
+    def _fix_files(self, started: float) -> fixer.Fixed:
+        """Rewrite the files under the index lock. The catalog follows in the index run after."""
+        self.indexer.set_status(state="fixing", total=0, done=0, errors=0, started_at=started)
+        with IndexLock(lock_path(self.root)), self._edit_connection() as conn:
+            fixed = fixer.fix_library(
+                self.root,
+                conn,
+                self.config,
+                guard=self._edits,
+                progress=lambda done, total: self.indexer.set_status(done=done, total=total),
+            )
+        return fixed
+
+    def _index(self, reread: Collection[str] = ()) -> None:
         while True:
             with self._lock:
                 self._pending = False
             try:
-                self.indexer.run()
+                self.indexer.run(reread=reread)
+                reread = ()
                 self.last_error = None
                 self.rebuilding = True
                 self.store.rebuild()
@@ -132,12 +194,8 @@ class Server(SearchMixin, CollectionLookupMixin):
 
         Raises what file_ops.rename_file raises, or sqlite3.OperationalError when busy.
         """
-        with self._edits:
-            conn = self._edit_connection()
-            try:
-                renamed = file_ops.rename_file(self.root, conn, self.config, file_id, name)
-            finally:
-                conn.close()
+        with self._editing() as conn:
+            renamed = file_ops.rename_file(self.root, conn, self.config, file_id, name)
 
             def patch(snap: Snapshot) -> None:
                 if renamed.replaced is not None:
@@ -148,26 +206,48 @@ class Server(SearchMixin, CollectionLookupMixin):
         self._index_again_if_running()
         return renamed
 
+    def tag(self, ids: list[int], add: list[str], remove: list[str]) -> file_ops.Tagged:
+        """Retag files on disk, in the catalog and in the served snapshot."""
+        with self._editing() as conn:
+            tagged = file_ops.tag_files(self.root, conn, ids, add, remove)
+            if tagged.tags:
+                self.store.patch(partial(apply_tags, tags=tagged.tags))
+        if tagged.failed:
+            self.request_index()  # a file may have changed or gone since it was indexed
+        else:
+            self._index_again_if_running()
+        return tagged
+
     def trash(self, ids: list[int]) -> file_ops.Trashed:
         """Move files to the system trash and drop them from the catalog and the snapshot."""
-        with self._edits:
-            conn = self._edit_connection()
+        with self._editing() as conn:
             try:
                 trashed = file_ops.trash_files(self.root, conn, ids)
             except sqlite3.Error:
                 self.request_index()  # some files may be gone already: let a run catch up
                 raise
-            finally:
-                conn.close()
             if trashed.removed:
                 self.store.patch(partial(apply_removal, ids=trashed.removed))
         self._index_again_if_running()
         return trashed
 
-    def _edit_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _edit_connection(self) -> Iterator[sqlite3.Connection]:
+        """An open writer connection, closed after the block; requires a catalog."""
         if not self.catalog.is_file():
             raise no_catalog()
-        return connect(self.catalog, timeout=_EDIT_BUSY_TIMEOUT)
+        conn = connect(self.catalog, timeout=_EDIT_BUSY_TIMEOUT)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    @contextmanager
+    def _editing(self) -> Iterator[sqlite3.Connection]:
+        """An edit connection while the edit lock is held, so edits run one at a time and the
+        snapshot follows them in the catalog's order."""
+        with self._edits, self._edit_connection() as conn:
+            yield conn
 
     def _index_again_if_running(self) -> None:
         """A run in progress may have scanned the library before the edit; queue another so
@@ -194,5 +274,6 @@ def same_origin(request: Request) -> None:
     answers; this check does not depend on that.
     """
     origin = request.headers.get("origin")
-    if origin is not None and urlsplit(origin).hostname not in ALLOWED_HOSTS:
+    allowed = server_of(request).config.server.allowed_hosts
+    if origin is not None and urlsplit(origin).hostname not in allowed:
         raise ApiError(403, "cross_origin", "requests from other sites cannot change the library")

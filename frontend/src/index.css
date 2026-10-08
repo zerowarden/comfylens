@@ -49,12 +49,20 @@
 }
 
 @theme {
+  /* One corner radius for the whole app: `rounded`. The sized scale (rounded-sm, -md, -lg...) is
+     cleared so nothing else can creep in; `rounded-full` remains for circles and pills. */
+  --radius-*: initial;
+  --radius: 2px;
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  --animate-panel-in: panel-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  --animate-expand: expand 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  --animate-fade-in: fade-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* One easing and two durations for every transition and animation: `ease-snappy`, and
+     `duration-(--dur-fast)` / `duration-(--dur)` (see :root below). */
+  --ease-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-panel-in: panel-in 220ms var(--ease-snappy);
+  --animate-expand: expand 180ms var(--ease-snappy);
+  --animate-fade-in: fade-in 180ms var(--ease-snappy);
+  --animate-pop-in: pop-in 180ms var(--ease-snappy);
   /* `forwards` holds the last frame until the view unmounts a frame or two later. */
   --animate-fade-out: fade-out 150ms ease-in forwards;
 
@@ -70,6 +78,12 @@
       transform: translateY(-4px);
     }
   }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
+  }
   @keyframes fade-in {
     from {
       opacity: 0;
@@ -82,12 +96,166 @@
   }
 }
 
-/* Tailwind 4 leaves buttons with the default arrow; anything clickable shows a pointer. */
 @layer base {
+  :root {
+    --dur-fast: 120ms;
+    --dur: 200ms;
+  }
+
+  /* Tailwind 4 leaves buttons with the default arrow; anything clickable shows a pointer. */
   button:not(:disabled),
   [role="button"]:not(:disabled),
   summary {
     cursor: pointer;
+  }
+
+  /* One keyboard focus ring for everything; text fields mark focus with their border instead
+     (FIELD in ui.tsx). */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Every check box, drawn crisply: a square box with the app's radius, filled with the accent
+     when checked and holding a sharp tick, or a bar when only some of what it stands for is
+     chosen. The mark is cut with a polygon so its edges stay sharp at any scale. */
+  input[type="checkbox"] {
+    display: inline-grid;
+    flex: none;
+    place-content: center;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    border: 1px solid var(--control);
+    border-radius: var(--radius);
+    background: var(--canvas);
+    cursor: pointer;
+    appearance: none;
+    transition:
+      background-color var(--dur-fast) var(--ease-snappy),
+      border-color var(--dur-fast) var(--ease-snappy);
+  }
+  input[type="checkbox"]::before {
+    width: 10px;
+    height: 10px;
+    background: var(--on-primary);
+    content: "";
+    transform: scale(0);
+    transition: transform var(--dur-fast) var(--ease-snappy);
+  }
+  input[type="checkbox"]:hover:not(:checked, :indeterminate, :disabled) {
+    border-color: var(--muted);
+  }
+  input[type="checkbox"]:checked,
+  input[type="checkbox"]:indeterminate {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  input[type="checkbox"]:checked::before {
+    clip-path: polygon(14% 52%, 26% 40%, 41% 55%, 76% 20%, 88% 32%, 41% 79%);
+    transform: scale(1);
+  }
+  input[type="checkbox"]:indeterminate::before {
+    clip-path: inset(42% 15%);
+    transform: scale(1);
+  }
+  input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  /* Every slider: a thin track filled with the accent up to `--fill` (Slider in ui.tsx sets it)
+     and a round thumb that grows under the pointer. `.dual` sliders are drawn over a track of
+     their own and show only their thumbs (the range filter in FilterSidebar.tsx). */
+  input[type="range"] {
+    --fill: 0%;
+    height: 16px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+    appearance: none;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: var(--radius);
+    background: linear-gradient(to right, var(--accent) var(--fill), var(--track) var(--fill));
+  }
+  input[type="range"]::-moz-range-track {
+    height: 4px;
+    border-radius: var(--radius);
+    background: linear-gradient(to right, var(--accent) var(--fill), var(--track) var(--fill));
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    box-sizing: border-box;
+    width: 12px;
+    height: 12px;
+    margin-top: -4px;
+    border: 2px solid var(--accent);
+    border-radius: 9999px;
+    background: var(--canvas);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+    appearance: none;
+    transition:
+      transform var(--dur-fast) var(--ease-snappy),
+      box-shadow var(--dur-fast) var(--ease-snappy);
+  }
+  input[type="range"]::-moz-range-thumb {
+    box-sizing: border-box;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--accent);
+    border-radius: 9999px;
+    background: var(--canvas);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+    transition:
+      transform var(--dur-fast) var(--ease-snappy),
+      box-shadow var(--dur-fast) var(--ease-snappy);
+  }
+  input[type="range"]:hover::-webkit-slider-thumb {
+    transform: scale(1.15);
+  }
+  input[type="range"]:hover::-moz-range-thumb {
+    transform: scale(1.15);
+  }
+  input[type="range"]:active::-webkit-slider-thumb {
+    transform: scale(1.3);
+  }
+  input[type="range"]:active::-moz-range-thumb {
+    transform: scale(1.3);
+  }
+  input[type="range"]:focus-visible {
+    outline: none;
+  }
+  input[type="range"]:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  input[type="range"]:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  input[type="range"].dual {
+    pointer-events: none;
+  }
+  input[type="range"].dual::-webkit-slider-runnable-track {
+    background: transparent;
+  }
+  input[type="range"].dual::-moz-range-track {
+    background: transparent;
+  }
+  input[type="range"].dual::-webkit-slider-thumb {
+    pointer-events: auto;
+  }
+  input[type="range"].dual::-moz-range-thumb {
+    pointer-events: auto;
+  }
+
+  /* Motion stays, but over in an instant: the end events that unmount closed content still fire. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      transition-duration: 1ms !important;
+      animation-duration: 1ms !important;
+    }
   }
 }
 

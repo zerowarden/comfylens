@@ -5,8 +5,7 @@ from typing import Any
 
 from comfylens.extract.constants import source_literal
 from comfylens.extract.registry import REGISTRY, Role
-from comfylens.graph.model import Graph, Link, Node
-from comfylens.graph.reachability import Switch
+from comfylens.graph import Graph, Link, Node, Switch
 
 
 def inactive_inputs(graph: Graph, switches: Mapping[str, Switch]) -> set[tuple[str, str]]:

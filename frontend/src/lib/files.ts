@@ -1,7 +1,9 @@
 import type { ImageItem, ImagesPage } from "../api/types";
 
-/** Ids per trash request: TRASH_BATCH in src/comfylens/api/schemas.py. */
+/** Ids per trash or tag request: TRASH_BATCH in src/comfylens/api/schemas.py. */
 export const TRASH_BATCH = 500;
+/** MAX_TAG_LENGTH in src/comfylens/metadata/xmp.py. */
+export const MAX_TAG_LENGTH = 64;
 
 export function baseName(relPath: string): string {
   return relPath.slice(relPath.lastIndexOf("/") + 1);
@@ -49,9 +51,9 @@ export function attachmentName(header: string): string | null {
 }
 
 export function chunks<T>(items: readonly T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, i) =>
+    items.slice(i * size, (i + 1) * size),
+  );
 }
 
 /**
@@ -66,28 +68,48 @@ export function removeFromPages(
   gone: ReadonlySet<number>,
   pageSize: number,
 ): Map<number, ImagesPage> {
-  const known = new Map<number, ImageItem>();
-  for (const page of pages.values()) for (const item of page.items) known.set(item.id, item);
+  const known = new Map(
+    [...pages.values()].flatMap((page) => page.items.map((item) => [item.id, item] as const)),
+  );
   const kept = order.filter((id) => !gone.has(id));
-  const out = new Map<number, ImagesPage>();
-  for (const p of pages.keys()) {
-    const items: ImageItem[] = [];
-    for (const id of kept.slice(p * pageSize, (p + 1) * pageSize)) {
-      const item = known.get(id);
-      if (!item) break;
-      items.push(item);
-    }
-    out.set(p, { total: kept.length, offset: p * pageSize, items });
-  }
-  return out;
+  const rebuilt = (p: number): ImagesPage => {
+    const items = kept.slice(p * pageSize, (p + 1) * pageSize).map((id) => known.get(id));
+    const missing = items.indexOf(undefined);
+    const cached = (missing < 0 ? items : items.slice(0, missing)) as ImageItem[];
+    return { total: kept.length, offset: p * pageSize, items: cached };
+  };
+  return new Map([...pages.keys()].map((p) => [p, rebuilt(p)]));
 }
 
-export function renameInPage(page: ImagesPage, id: number, relPath: string): ImagesPage {
-  if (!page.items.some((item) => item.id === id)) return page;
-  return {
-    ...page,
-    items: page.items.map((item) => (item.id === id ? { ...item, rel_path: relPath } : item)),
-  };
+/** `page` with `change` applied to the items in `ids`; the same page when it holds none. */
+export function updateItems(
+  page: ImagesPage,
+  ids: ReadonlySet<number>,
+  change: (item: ImageItem) => ImageItem,
+): ImagesPage {
+  if (!page.items.some((item) => ids.has(item.id))) return page;
+  return { ...page, items: page.items.map((item) => (ids.has(item.id) ? change(item) : item)) };
+}
+
+/** The tags typed into a field: comma-separated, trimmed, without empty ones. */
+export function splitTags(text: string): string[] {
+  return text
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+/** `tags` without `remove`, then with `add`: sorted and unique, as the server stores them. */
+export function retag(tags: readonly string[], add: readonly string[], remove: readonly string[]) {
+  return [...new Set([...tags.filter((t) => !remove.includes(t)), ...add])].sort();
+}
+
+/** Why `tag` cannot be added, or null when it can. Mirrors TagRequest's checks on the server. */
+export function tagProblem(tag: string): string | null {
+  if ([...tag].length > MAX_TAG_LENGTH) return `A tag is at most ${MAX_TAG_LENGTH} characters.`;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(tag)) return "A tag cannot contain control characters.";
+  return null;
 }
 
 /**
@@ -101,7 +123,6 @@ export function nextRemaining(
 ): number | null {
   const index = order.indexOf(id);
   if (index < 0) return null;
-  for (let i = index + 1; i < order.length; i++) if (!gone.has(order[i]!)) return order[i]!;
-  for (let i = index - 1; i >= 0; i--) if (!gone.has(order[i]!)) return order[i]!;
-  return null;
+  const remains = (other: number) => !gone.has(other);
+  return order.slice(index + 1).find(remains) ?? order.slice(0, index).findLast(remains) ?? null;
 }

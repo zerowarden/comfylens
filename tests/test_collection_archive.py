@@ -87,9 +87,7 @@ def test_round_trip(tmp_path: Path, config: Config):
     assert golden["settings"]["loras"] == [
         {"name": "fox", "strength_model": 0.8, "strength_clip": None}
     ]
-    assert target.prompts_for_hash(ATTEMPT) == [
-        (by_title["Golden"]["id"], "Golden", "attempt")
-    ]
+    assert target.prompts_for_hash(ATTEMPT) == [(by_title["Golden"]["id"], "Golden", "attempt")]
 
     restored = target.get(target.summaries(q="Golden")[0]["id"])
     assert restored is not None

@@ -67,8 +67,7 @@ READ_CODES = frozenset(
 
 
 # Notes that change no extracted value: an unused LoRA, a node the model passes through, an
-# image made without a sampler. They are kept and shown, but do not mark a file as having
-# warnings (the grid badge and the has_warnings filter).
+# image made without a sampler. The report marks them as informational.
 INFORMATIONAL_CODES = frozenset(
     {Code.UNUSED_LORA, Code.UNKNOWN_MODEL_PATCH, Code.NO_SAMPLER, Code.GENERATED_PROMPT}
 )

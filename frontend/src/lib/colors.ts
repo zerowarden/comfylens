@@ -5,7 +5,6 @@ export const NO_METADATA = "(no metadata)";
 
 export function familyColor(family: string | null | undefined): string {
   if (!family || family === NO_METADATA) return "var(--family-none)";
-  let hash = 0;
-  for (let i = 0; i < family.length; i++) hash = (hash * 31 + family.charCodeAt(i)) >>> 0;
+  const hash = family.split("").reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 0);
   return `var(--family-${hash % FAMILY_COLORS})`;
 }

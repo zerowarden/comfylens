@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass, field
 
-from comfylens.extract.registry import REGISTRY, Role
+from comfylens.extract.registry import REGISTRY, Entry, Role
 from comfylens.extract.switches import follow
 from comfylens.extract.values import read_float
-from comfylens.graph.model import Graph, Link, Node
+from comfylens.graph import Graph, Link, Node
 from comfylens.warn import Code, Warn
 
 
@@ -18,37 +18,53 @@ class ModelChain:
 
 
 def trace_model(graph: Graph, link: Link | None, sampler_id: str) -> ModelChain:
-    chain = ModelChain()
-    outward: list[str] = []  # LoRA nodes from the sampler towards the loader
-    last_id = sampler_id
+    passed, end = _until_loader(graph, link)
+    patches = [(n, e) for n, e in passed if e is not None and e.role is Role.MODEL_PATCH]
+    # A node that passes the model on in a way the registry does not know.
+    unknown = [
+        Warn(Code.UNKNOWN_MODEL_PATCH, node.id, f"{node.class_type} passes the model on")
+        for node, entry in passed
+        if _role(entry) not in (Role.LORA, Role.MODEL_PATCH) and node.link("model") is not None
+    ]
+    last_id = passed[-1][0].id if passed else sampler_id
+    return ModelChain(
+        loader=end[0] if end and end[1] is Role.MODEL_LOADER else None,
+        lora_nodes=[node.id for node, entry in reversed(passed) if _role(entry) is Role.LORA],
+        # The patch nearest the sampler is the one in effect.
+        shift=next(
+            (
+                v
+                for node, entry in patches
+                if (v := read_float(graph, node, entry, "shift")) is not None
+            ),
+            None,
+        ),
+        warnings=[*unknown, *_end_warnings(end, last_id)],
+    )
+
+
+def _role(entry: Entry | None) -> Role | None:
+    return entry.role if entry else None
+
+
+def _until_loader(
+    graph: Graph, link: Link | None
+) -> tuple[list[tuple[Node, Entry | None]], tuple[Node, Role] | None]:
+    """The nodes from the sampler towards the loader, and the loader or switch that ends the
+    walk; None when the chain just ends."""
+    passed: list[tuple[Node, Entry | None]] = []
     for node in follow(graph, link, "model"):
         entry = REGISTRY.get(node.class_type)
-        role = entry.role if entry else None
-        if role is Role.SWITCH:  # a computed condition: the chain cannot be followed
-            chain.warnings.append(
-                Warn(Code.MODEL_CHAIN_BROKEN, node.id, "a switch chooses the model at run time")
-            )
-            return _finish(chain, outward)
-        last_id = node.id
-        if role is Role.MODEL_LOADER:
-            chain.loader = node
-            break
-        if role is Role.LORA:
-            outward.append(node.id)
-        elif role is Role.MODEL_PATCH and entry is not None:
-            if chain.shift is None:  # nearest the sampler is the one in effect
-                chain.shift = read_float(graph, node, entry, "shift")
-        elif node.link("model") is not None:
-            chain.warnings.append(
-                Warn(Code.UNKNOWN_MODEL_PATCH, node.id, f"{node.class_type} passes the model on")
-            )
-    if chain.loader is None:
-        chain.warnings.append(
-            Warn(Code.MODEL_CHAIN_BROKEN, last_id, "model chain ends before a model loader")
-        )
-    return _finish(chain, outward)
+        if entry and entry.role in (Role.SWITCH, Role.MODEL_LOADER):
+            return passed, (node, entry.role)
+        passed.append((node, entry))
+    return passed, None
 
 
-def _finish(chain: ModelChain, outward: list[str]) -> ModelChain:
-    chain.lora_nodes = outward[::-1]
-    return chain
+def _end_warnings(end: tuple[Node, Role] | None, last_id: str) -> list[Warn]:
+    if end is None:
+        return [Warn(Code.MODEL_CHAIN_BROKEN, last_id, "model chain ends before a model loader")]
+    node, role = end
+    if role is Role.SWITCH:  # a computed condition: the chain cannot be followed
+        return [Warn(Code.MODEL_CHAIN_BROKEN, node.id, "a switch chooses the model at run time")]
+    return []

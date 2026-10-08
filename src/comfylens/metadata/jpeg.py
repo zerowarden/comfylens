@@ -10,14 +10,16 @@ import html
 import json
 import re
 import warnings
-from dataclasses import dataclass, field
+from collections.abc import Iterator
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
 from PIL import Image
 
 from comfylens.metadata.png import decode_text
-from comfylens.metadata.types import Scan, TextHit
+from comfylens.metadata.types import Scan, TextHit, Truncated, until_truncated
+from comfylens.metadata.xmp import XML_LI, read_tags
 from comfylens.warn import Code, Warn
 
 SOI = b"\xff\xd8"
@@ -27,6 +29,8 @@ XMP_PREFIX = b"http://ns.adobe.com/xap/1.0/\x00"
 _SOF_MARKERS = frozenset(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
 # Markers with no length field: RSTn and TEM.
 STANDALONE_MARKERS = frozenset(range(0xD0, 0xD8)) | {0x01}
+SOS, EOI = 0xDA, 0xD9
+_APP1, _COM = 0xE1, 0xFE
 
 _EXIF_IFD = 0x8769
 _USER_COMMENT = 0x9286
@@ -41,86 +45,83 @@ class NotJPEG(ValueError):
     """The data does not start with a JPEG SOI marker."""
 
 
-@dataclass
-class _Segments:
-    size: tuple[int, int] | None = None
-    exif: bytes | None = None  # first APP1 Exif payload, "Exif\0\0" included
-    xmp: list[bytes] = field(default_factory=list)
-    comments: list[bytes] = field(default_factory=list)
-    truncated: bool = False
+@dataclass(frozen=True, slots=True)
+class Segment:
+    marker: int
+    start: int  # of the first 0xFF, fill bytes included
+    stop: int  # after the payload; for SOS, after its header only
+    payload: memoryview  # empty for markers without a length field
+
+
+def jpeg_segments(view: memoryview, pos: int = len(SOI)) -> Iterator[Segment]:
+    """Marker segments from `pos` through the first SOS or EOI. Raises Truncated."""
+    while True:
+        segment = _segment(view, pos)
+        yield segment
+        if segment.marker in (SOS, EOI):
+            return
+        pos = segment.stop
+
+
+def _segment(view: memoryview, start: int) -> Segment:
+    pos = start
+    while pos < len(view) and view[pos] == 0xFF:  # fill bytes may pad any marker
+        pos += 1
+    if pos == start or pos >= len(view):
+        raise Truncated("the JPEG is truncated or malformed")
+    marker = view[pos]
+    if marker in STANDALONE_MARKERS or marker == EOI:
+        return Segment(marker, start, pos + 1, view[0:0])
+    length = int.from_bytes(view[pos + 1 : pos + 3])
+    if pos + 3 > len(view) or length < 2 or pos + 1 + length > len(view):
+        raise Truncated("the JPEG ends inside a segment")
+    return Segment(marker, start, pos + 1 + length, view[pos + 3 : pos + 1 + length])
 
 
 def read_jpeg(data: bytes | memoryview) -> Scan:
     view = memoryview(data)
-    segments = _scan_segments(view)
-    hits: list[TextHit] = []
-
-    if segments.size is not None:
-        width, height = segments.size
-    else:
-        with Image.open(BytesIO(view)) as img:
-            width, height = img.size
-    if segments.exif is not None:
-        # Parse only the collected segment: Image.open fails on files truncated before SOS.
-        exif = Image.Exif()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # Pillow warns on short reads and returns what it has
-            exif.load(segments.exif)
-        hits += _probe_ifd0(exif)
-        hits += _probe_user_comment(exif.get_ifd(_EXIF_IFD).get(_USER_COMMENT))
-        hits += _probe_description(exif.get(_IMAGE_DESCRIPTION), hits)
-    for packet in segments.xmp:
-        hits += _probe_xmp(decode_text(packet))
-    for comment in segments.comments:
-        text = decode_text(comment).rstrip("\0")
-        hits.append(_split_prefixed(text, "comment", "jpeg:COM"))
-
-    truncated = [Warn(Code.TRUNCATED, None, "JPEG ends inside a segment")]
-    return Scan("jpeg", width, height, hits, truncated if segments.truncated else [])
-
-
-def _scan_segments(view: memoryview) -> _Segments:
-    """Read marker-plus-length segments from SOI up to SOS."""
     if bytes(view[:2]) != SOI:
         raise NotJPEG("missing JPEG SOI marker")
-    out = _Segments()
-    pos, end = 2, len(view)
-    while pos < end:
-        if view[pos] != 0xFF:
-            break  # not a marker: stop rather than guess
-        while pos < end and view[pos] == 0xFF:  # fill bytes
-            pos += 1
-        if pos >= end:
-            out.truncated = True
-            break
-        marker = view[pos]
-        pos += 1
-        if marker in (0xDA, 0xD9):  # SOS, EOI
-            break
-        if marker in STANDALONE_MARKERS:
-            continue
-        if pos + 2 > end:
-            out.truncated = True
-            break
-        length = int.from_bytes(view[pos : pos + 2])
-        if length < 2:
-            break
-        if pos + length > end:
-            out.truncated = True
-            break
-        payload = view[pos + 2 : pos + length]
-        if marker in _SOF_MARKERS and len(payload) >= 5:
-            height = int.from_bytes(payload[1:3])
-            width = int.from_bytes(payload[3:5])
-            out.size = out.size or (width, height)
-        elif marker == 0xE1 and out.exif is None and bytes(payload[:6]) == EXIF_PREFIX:
-            out.exif = bytes(payload)
-        elif marker == 0xE1 and bytes(payload[: len(XMP_PREFIX)]) == XMP_PREFIX:
-            out.xmp.append(bytes(payload[len(XMP_PREFIX) :]))
-        elif marker == 0xFE:
-            out.comments.append(bytes(payload))
-        pos += length
-    return out
+    segments, truncated = until_truncated(jpeg_segments(view))
+    app1 = [bytes(s.payload) for s in segments if s.marker == _APP1]
+    exif = next((p for p in app1 if p.startswith(EXIF_PREFIX)), None)
+    xmp = [decode_text(p[len(XMP_PREFIX) :]) for p in app1 if p.startswith(XMP_PREFIX)]
+    own = [(packet, read_tags(packet)) for packet in xmp]
+    comments = [decode_text(bytes(s.payload)).rstrip("\0") for s in segments if s.marker == _COM]
+    hits = [
+        *(_exif_hits(exif) if exif is not None else []),
+        *(hit for packet, tags in own if tags is None for hit in _probe_xmp(packet)),
+        *(_split_prefixed(text, "comment", "jpeg:COM") for text in comments),
+    ]
+    warnings = [Warn(Code.TRUNCATED, None, "JPEG ends inside a segment")] if truncated else []
+    return Scan(
+        "jpeg",
+        *_size(view, segments),
+        hits=hits,
+        warnings=warnings,
+        tags=next((tags for _, tags in reversed(own) if tags is not None), []),
+    )
+
+
+def _size(view: memoryview, segments: list[Segment]) -> tuple[int, int]:
+    """Width and height from the first SOF, else from Pillow."""
+    sof = next(
+        (s.payload for s in segments if s.marker in _SOF_MARKERS and len(s.payload) >= 5), None
+    )
+    if sof is not None:
+        return int.from_bytes(sof[3:5]), int.from_bytes(sof[1:3])
+    with Image.open(BytesIO(view)) as img:
+        return img.size
+
+
+def _exif_hits(segment: bytes) -> list[TextHit]:
+    # Parse only the collected segment: Image.open fails on files truncated before SOS.
+    exif = Image.Exif()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # Pillow warns on short reads and returns what it has
+        exif.load(segment)
+    hits = _probe_ifd0(exif) + _probe_user_comment(exif.get_ifd(_EXIF_IFD).get(_USER_COMMENT))
+    return hits + _probe_description(exif.get(_IMAGE_DESCRIPTION), hits)
 
 
 def _exif_str(value: Any) -> str | None:
@@ -214,7 +215,6 @@ def _probe_description(value: Any, earlier: list[TextHit]) -> list[TextHit]:
 
 
 _XML_ATTR = re.compile(r"""([\w.-]+:)?([\w.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
-_XML_LI = re.compile(r"<rdf:li\b[^>]*>(.*?)</rdf:li>", re.S)
 _XML_OPEN = re.compile(r"<(?![/?!])(?:([\w.-]+):)?([\w.-]+)")
 _CDATA = re.compile(r"^\s*<!\[CDATA\[(.*)\]\]>\s*$", re.S)
 
@@ -233,7 +233,7 @@ def _probe_xmp(packet: str) -> list[TextHit]:
     # An rdf:li is named after the nearest enclosing property element (dc:description, ...).
     opens = [(m.start(), m.group(2)) for m in _XML_OPEN.finditer(packet) if m.group(1) != "rdf"]
     starts = [pos for pos, _ in opens]
-    for m in _XML_LI.finditer(packet):
+    for m in XML_LI.finditer(packet):
         inner = m.group(1)
         cdata = _CDATA.match(inner)
         value = cdata.group(1) if cdata else html.unescape(inner)

@@ -4,12 +4,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-import xxhash
-
 from comfylens.collection.models import EXTENSIONS, OriginalFormat
 from comfylens.collection.store_base import GC_GRACE_SECONDS, HASH, _now, _StoreBase
-from comfylens.db.connection import transaction
+from comfylens.db import transaction
 from comfylens.fileio import write_atomic
+from comfylens.metadata import hash_content
 
 
 class OriginalsMixin(_StoreBase):
@@ -26,7 +25,7 @@ class OriginalsMixin(_StoreBase):
         workflow: str | None,
     ) -> str:
         """Store an image's exact bytes; returns its content hash. Storing it again is a no-op."""
-        content_hash = xxhash.xxh3_128_hexdigest(data)
+        content_hash = hash_content(data)
         self.write_file(content_hash, fmt, data)
         with self._connect() as conn, transaction(conn):
             # A re-upload restarts the grace period of an original no prompt uses yet.

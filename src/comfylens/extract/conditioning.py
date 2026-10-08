@@ -4,11 +4,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from comfylens.extract import strings
-from comfylens.extract.registry import REGISTRY, Role
+from comfylens.extract.registry import REGISTRY, Entry, Role
 from comfylens.extract.switches import through_switches
 from comfylens.extract.values import read_float
-from comfylens.graph.model import Graph, Link, Node
-from comfylens.graph.reachability import Reachability
+from comfylens.graph import Graph, Link, Node, Reachability
 from comfylens.warn import Code, Warn
 
 HEURISTIC_MIN_CHARS = 20
@@ -23,73 +22,101 @@ class SideTrace:
     warnings: list[Warn] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class _Walk:
+    graph: Graph
+    out: SideTrace = field(default_factory=SideTrace)
+    texts: list[tuple[str, str]] = field(default_factory=list)  # (node id, text)
+    zeroed: bool = False  # a branch's prompt is the empty string
+
+    def warn(self, code: Code, node_id: str | None, message: str) -> None:
+        self.out.warnings.append(Warn(code, node_id, message))
+
+
 def trace_side(graph: Graph, reach: Reachability, links: list[Link]) -> SideTrace:
-    out = SideTrace()
-    texts: list[tuple[str, str]] = []  # (node id, text)
-    zeroed = False
-    stack = links[::-1]
-    seen: set[Link] = set()
+    """Depth first from the sampler's links, each link once; each node read by its role."""
+    walk = _Walk(graph)
+    stack, seen = links[::-1], set[Link]()
     while stack:
         popped = stack.pop()
         link = through_switches(graph, popped)
         if link is None:
-            message = "a switch chooses the conditioning at run time"
-            out.warnings.append(Warn(Code.PROMPT_UNRESOLVED, popped.src, message))
-            continue
-        if link in seen:
-            continue
-        seen.add(link)
-        node = graph.nodes[link.src]
-        entry = REGISTRY.get(node.class_type)
-        role = entry.role if entry else None
+            walk.warn(
+                Code.PROMPT_UNRESOLVED, popped.src, "a switch chooses the conditioning at run time"
+            )
+        elif link not in seen:
+            seen.add(link)
+            stack += _visit(walk, graph.nodes[link.src], link)
+    return _finish(walk, reach)
 
-        if role is Role.TEXT_ENCODER and entry is not None:
-            out.encoders.append(node.id)
-            if out.encoder_guidance is None:
-                out.encoder_guidance = read_float(graph, node, entry, "guidance")
-            generated: list[str] = []
-            text = _encoder_text(graph, node, entry.slots.get(link.slot, ()), generated)
-            out.warnings += generated_warnings(graph, generated)
-            if text is None:
-                out.warnings.append(
-                    Warn(Code.PROMPT_UNRESOLVED, node.id, f"no text for output slot {link.slot}")
-                )
-            else:
-                texts.append((node.id, text))
-        elif role is Role.CONDITIONING_ZERO:
-            zeroed = True  # this branch's prompt is the empty string
-        elif role is Role.CONDITIONING_PASS and entry is not None:
-            if out.guidance is None:
-                out.guidance = read_float(graph, node, entry, "guidance")
-            stack += _linked(node, lambda name: name.startswith("conditioning"))
-        else:
-            literals = [
-                v
-                for v in node.inputs.values()
-                if isinstance(v, str) and len(v) >= HEURISTIC_MIN_CHARS
-            ]
-            if literals:
-                texts.append((node.id, max(literals, key=len)))
-                out.warnings.append(
-                    Warn(Code.HEURISTIC_PROMPT, node.id, f"prompt guessed from {node.class_type}")
-                )
-            elif followed := _linked(node, lambda name: "cond" in name):
-                stack += followed
-            else:
-                message = f"cannot read a prompt from {node.class_type}"
-                out.warnings.append(Warn(Code.PROMPT_UNRESOLVED, node.id, message))
 
+def _visit(walk: _Walk, node: Node, link: Link) -> list[Link]:
+    """Read one node into `walk`; returns the links to follow from it."""
+    entry = REGISTRY.get(node.class_type)
+    visitor = _VISITORS.get(entry.role) if entry else None
+    return visitor(walk, node, entry, link) if visitor and entry else _visit_unknown(walk, node)
+
+
+def _visit_encoder(walk: _Walk, node: Node, entry: Entry, link: Link) -> list[Link]:
+    walk.out.encoders.append(node.id)
+    if walk.out.encoder_guidance is None:
+        walk.out.encoder_guidance = read_float(walk.graph, node, entry, "guidance")
+    generated: list[str] = []
+    text = _encoder_text(walk.graph, node, entry.slots.get(link.slot, ()), generated)
+    walk.out.warnings += generated_warnings(walk.graph, generated)
+    if text is None:
+        walk.warn(Code.PROMPT_UNRESOLVED, node.id, f"no text for output slot {link.slot}")
+    else:
+        walk.texts.append((node.id, text))
+    return []
+
+
+def _visit_zero(walk: _Walk, node: Node, entry: Entry, link: Link) -> list[Link]:
+    walk.zeroed = True
+    return []
+
+
+def _visit_pass(walk: _Walk, node: Node, entry: Entry, link: Link) -> list[Link]:
+    if walk.out.guidance is None:  # nearest the sampler is the one in effect
+        walk.out.guidance = read_float(walk.graph, node, entry, "guidance")
+    return _linked(node, lambda name: name.startswith("conditioning"))
+
+
+_VISITORS: dict[Role, Callable[[_Walk, Node, Entry, Link], list[Link]]] = {
+    Role.TEXT_ENCODER: _visit_encoder,
+    Role.CONDITIONING_ZERO: _visit_zero,
+    Role.CONDITIONING_PASS: _visit_pass,
+}
+
+
+def _visit_unknown(walk: _Walk, node: Node) -> list[Link]:
+    """A node of no known role: its longest long-enough string input is taken as the prompt,
+    else its conditioning-like inputs are followed."""
+    literals = [
+        v for v in node.inputs.values() if isinstance(v, str) and len(v) >= HEURISTIC_MIN_CHARS
+    ]
+    if literals:
+        walk.texts.append((node.id, max(literals, key=len)))
+        walk.warn(Code.HEURISTIC_PROMPT, node.id, f"prompt guessed from {node.class_type}")
+        return []
+    followed = _linked(node, lambda name: "cond" in name)
+    if not followed:
+        walk.warn(Code.PROMPT_UNRESOLVED, node.id, f"cannot read a prompt from {node.class_type}")
+    return followed
+
+
+def _finish(walk: _Walk, reach: Reachability) -> SideTrace:
+    """Encoders and non-empty texts in graph order; several texts are joined. Texts that are all
+    empty, or a zeroed branch, give the empty prompt."""
+    out = walk.out
     out.encoders.sort(key=reach.rank.__getitem__)
-    nonempty = sorted((t for t in texts if t[1].strip()), key=lambda t: reach.rank[t[0]])
+    nonempty = sorted((t for t in walk.texts if t[1].strip()), key=lambda t: reach.rank[t[0]])
     if len(nonempty) > 1:
         out.warnings.append(
             Warn(Code.MULTIPLE_PROMPT_SOURCES, None, f"{len(nonempty)} prompt sources joined")
         )
-        out.prompt = "\n\n".join(text for _, text in nonempty)
-    elif nonempty:
-        out.prompt = nonempty[0][1]
-    elif texts or zeroed:
-        out.prompt = ""
+    has_prompt = bool(walk.texts) or walk.zeroed
+    out.prompt = "\n\n".join(text for _, text in nonempty) if has_prompt else None
     return out
 
 

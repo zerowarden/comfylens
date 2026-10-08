@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { api } from "../../api/client";
-import type { CollectionImage, PromptInput } from "../../api/types";
+import type { CollectionImage, PromptInput, PromptSettings, SavedPrompt } from "../../api/types";
 import { refreshAfterCollectionWrite, uploadDrafts, useCollectionList } from "../../lib/collection";
 import {
   appendReferences,
@@ -26,11 +26,12 @@ import { loraText, promptSettingsRows } from "../../lib/settings";
 import { useCollection, type Editor } from "../../state/collection";
 import { useFileActions } from "../../state/fileActions";
 import { useUi } from "../../state/ui";
+import Autocomplete from "../Autocomplete";
 import { Modal } from "../Modal";
 import { Glyph } from "../icons";
-import { Button, DialogActions, FOCUS_FIELD, PRIMARY, Thumbnail } from "../ui";
+import { Button, DialogActions, FIELD, PRIMARY, Thumbnail } from "../ui";
 
-const FIELD = `mt-1 block w-full px-2 py-1 text-sm ${FOCUS_FIELD}`;
+const INPUT = `mt-1 block w-full px-2 py-1 text-sm ${FIELD}`;
 
 const PASTED_NO_METADATA =
   "Pasted images carry no generation metadata. If the original file has some, drop or pick the file instead.";
@@ -114,13 +115,85 @@ function ImagesField({
   );
 }
 
+/** The fields an editor starts from: the draft's, or the saved prompt's. */
+const initialInput = (editor: Editor): PromptInput =>
+  editor.mode === "new" ? inputOfDraft(editor.draft, editor.references) : inputOf(editor.prompt);
+
+const initialReferences = (editor: Editor): CollectionImage[] =>
+  editor.mode === "new" ? editor.references : editor.prompt.references;
+
+/** Pasted references carry no metadata: say so from the start. */
+const initialNote = (editor: Editor): string | null =>
+  editor.mode === "new" && editor.draft.metadata === "none" && editor.references.length > 0
+    ? PASTED_NO_METADATA
+    : null;
+
+const savePrompt = (editor: Editor, body: PromptInput) =>
+  editor.mode === "new" ? api.createPrompt(body) : api.updatePrompt(editor.prompt.id, body);
+
+const MODE_TEXT = {
+  new: { title: "Save to collection", submit: "Save" },
+  edit: { title: "Edit saved prompt", submit: "Save changes" },
+};
+
+/**
+ * While the editor is open, pasted and dropped images go to `onFiles` wherever they land; a text
+ * paste carries no files and goes to the focused field as usual. Returns whether files are being
+ * dragged over the window.
+ */
+function useWindowFiles(onFiles: (files: File[], pasted: boolean) => void): boolean {
+  const [dragging, setDragging] = useState(false);
+  const deliver = useEffectEvent(onFiles);
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const files = imageFiles(e.clipboardData?.files ?? []);
+      if (files.length === 0) return;
+      e.preventDefault();
+      deliver(files, true);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDragging(true);
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (e.relatedTarget === null) setDragging(false); // left the window
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDragging(false);
+      deliver(imageFiles(e.dataTransfer?.files ?? []), false);
+    };
+    const listeners = {
+      paste: onPaste,
+      dragover: onDragOver,
+      dragleave: onDragLeave,
+      drop: onDrop,
+    };
+    const entries = Object.entries(listeners) as [string, EventListener][];
+    entries.forEach(([type, listener]) => window.addEventListener(type, listener));
+    return () => entries.forEach(([type, listener]) => window.removeEventListener(type, listener));
+  }, []);
+  return dragging;
+}
+
+/** The settings read from the reference images, on one line. */
+function ImageSettings({ settings }: { settings: PromptSettings }) {
+  const parts = [
+    ...promptSettingsRows(settings).map((r) => `${r.label} ${r.value}`),
+    ...settings.loras.map(loraText),
+  ];
+  if (parts.length === 0) return null;
+  return <p className="text-xs text-muted">Settings from the image: {parts.join(" · ")}</p>;
+}
+
 function EditorForm({ editor }: { editor: Editor }) {
   const client = useQueryClient();
   const openEditor = useCollection((s) => s.openEditor);
   const openPrompt = useCollection((s) => s.openPrompt);
   const notify = useFileActions((s) => s.notify);
-  const initial: PromptInput =
-    editor.mode === "new" ? inputOfDraft(editor.draft, editor.references) : inputOf(editor.prompt);
+  const initial = initialInput(editor);
   const [fields, setFields] = useState<DraftFields>({
     title: initial.title,
     positive: initial.positive,
@@ -133,24 +206,14 @@ function EditorForm({ editor }: { editor: Editor }) {
   const [notes, setNotes] = useState(initial.notes);
   const [sourceUrl, setSourceUrl] = useState(initial.source_url ?? "");
   const [tags, setTags] = useState(initial.tags.join(", "));
-  const [references, setReferences] = useState<CollectionImage[]>(
-    editor.mode === "new" ? editor.references : editor.prompt.references,
-  );
+  const [references, setReferences] = useState(initialReferences(editor));
   const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(
-    editor.mode === "new" && editor.draft.metadata === "none" && editor.references.length > 0
-      ? PASTED_NO_METADATA
-      : null,
-  );
+  const [note, setNote] = useState(initialNote(editor));
   const [adding, setAdding] = useState(0);
-  const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const facets = useCollectionList();
-
   const close = () => openEditor(null);
-  const settings = promptSettingsRows(fields.settings);
-  const loras = fields.settings.loras.map(loraText);
 
   /** Upload files one at a time; each becomes a reference as soon as it is stored. */
   const addFiles = async (files: File[], pasted: boolean) => {
@@ -165,79 +228,41 @@ function EditorForm({ editor }: { editor: Editor }) {
     if (failures.length > 0) setError(failures.join("; "));
     if (pasted && drafts.some((d) => d.metadata === "none")) setNote(PASTED_NO_METADATA);
   };
-  const onWindowFiles = useEffectEvent((files: File[], pasted: boolean) => {
-    void addFiles(files, pasted);
-  });
+  const dragging = useWindowFiles((files, pasted) => void addFiles(files, pasted));
 
-  // While the editor is open, pasted and dropped images become references wherever they land.
-  // A text paste carries no files and goes to the focused field as usual.
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const files = imageFiles(e.clipboardData?.files ?? []);
-      if (files.length === 0) return;
-      e.preventDefault();
-      onWindowFiles(files, true);
-    };
-    const onDragOver = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
-      e.preventDefault();
-      setDragging(true);
-    };
-    const onDragLeave = (e: DragEvent) => {
-      if (e.relatedTarget === null) setDragging(false); // left the window
-    };
-    const onDrop = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
-      e.preventDefault();
-      setDragging(false);
-      onWindowFiles(imageFiles(e.dataTransfer?.files ?? []), false);
-    };
-    window.addEventListener("paste", onPaste);
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("dragleave", onDragLeave);
-    window.addEventListener("drop", onDrop);
-    return () => {
-      window.removeEventListener("paste", onPaste);
-      window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("dragleave", onDragLeave);
-      window.removeEventListener("drop", onDrop);
-    };
-  }, []);
+  const onSaved = (saved: SavedPrompt) => {
+    client.setQueryData(["collection", "prompt", saved.id], saved);
+    close();
+    refreshAfterCollectionWrite(client);
+    if (useUi.getState().view === "collection") openPrompt(saved.id);
+    else notify({ text: `Saved “${saved.title}” to the collection`, tone: "info" });
+  };
 
   const submit = async (e: SubmitEvent) => {
     e.preventDefault();
-    if (!title.trim()) {
-      setError("A title is required.");
-      return;
-    }
-    const body: PromptInput = {
-      ...initial,
-      title: title.trim(),
-      positive,
-      negative,
-      notes,
-      source_url: sourceUrl.trim() || null,
-      model_family: family.trim() || null,
-      settings: fields.settings,
-      tags: parseTags(tags),
-      references: references.map((r) => r.content_hash),
-    };
-    if (adding > 0) {
-      setError("Wait for the images to finish uploading.");
-      return;
-    }
+    const problem = !title.trim()
+      ? "A title is required."
+      : adding > 0
+        ? "Wait for the images to finish uploading."
+        : null;
+    setError(problem);
+    if (problem) return;
     setSaving(true);
-    setError(null);
     try {
-      const saved =
-        editor.mode === "new"
-          ? await api.createPrompt(body)
-          : await api.updatePrompt(editor.prompt.id, body);
-      client.setQueryData(["collection", "prompt", saved.id], saved);
-      close();
-      refreshAfterCollectionWrite(client);
-      if (useUi.getState().view === "collection") openPrompt(saved.id);
-      else notify({ text: `Saved “${saved.title}” to the collection`, tone: "info" });
+      onSaved(
+        await savePrompt(editor, {
+          ...initial,
+          title: title.trim(),
+          positive,
+          negative,
+          notes,
+          source_url: sourceUrl.trim() || null,
+          model_family: family.trim() || null,
+          settings: fields.settings,
+          tags: parseTags(tags),
+          references: references.map((r) => r.content_hash),
+        }),
+      );
     } catch (e) {
       setError(errorText(e));
       setSaving(false);
@@ -245,12 +270,7 @@ function EditorForm({ editor }: { editor: Editor }) {
   };
 
   return (
-    <Modal
-      title={editor.mode === "new" ? "Save to collection" : "Edit saved prompt"}
-      onClose={close}
-      width="w-[720px]"
-      align="top"
-    >
+    <Modal title={MODE_TEXT[editor.mode].title} onClose={close} width="w-[720px]" align="top">
       <form onSubmit={(e) => void submit(e)} className="space-y-3">
         <ImagesField
           images={references}
@@ -274,74 +294,75 @@ function EditorForm({ editor }: { editor: Editor }) {
         />
         <Field label="Title">
           <input
+            autoComplete="off"
             value={title}
             onChange={(e) => set({ title: e.target.value })}
             maxLength={200}
             autoFocus
-            className={FIELD}
+            className={INPUT}
           />
         </Field>
         <Field label="Positive prompt">
           <textarea
+            autoComplete="off"
             value={positive}
             onChange={(e) => set({ positive: e.target.value })}
             rows={6}
-            className={`${FIELD} font-mono text-xs`}
+            className={`${INPUT} font-mono text-xs`}
           />
         </Field>
         <Field label="Negative prompt">
           <textarea
+            autoComplete="off"
             value={negative}
             onChange={(e) => set({ negative: e.target.value })}
             rows={2}
-            className={`${FIELD} font-mono text-xs`}
+            className={`${INPUT} font-mono text-xs`}
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Tags, comma separated">
-            <input value={tags} onChange={(e) => setTags(e.target.value)} className={FIELD} />
+            <input
+              autoComplete="off"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              className={INPUT}
+            />
           </Field>
           <Field label="Model family">
-            <input
+            <Autocomplete
               value={family}
-              onChange={(e) => set({ family: e.target.value })}
-              list="collection-families"
-              className={FIELD}
+              onChange={(value) => set({ family: value })}
+              onPick={(value) => set({ family: value })}
+              options={facets.data?.families}
+              className={INPUT}
             />
-            <datalist id="collection-families">
-              {facets.data?.families.map((f) => (
-                <option key={f.value} value={f.value} />
-              ))}
-            </datalist>
           </Field>
         </div>
         <Field label="Source URL">
           <input
+            autoComplete="off"
             value={sourceUrl}
             onChange={(e) => setSourceUrl(e.target.value)}
             placeholder="Where you found it"
-            className={FIELD}
+            className={INPUT}
           />
         </Field>
         <Field label="Notes">
           <textarea
+            autoComplete="off"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            className={FIELD}
+            className={INPUT}
           />
         </Field>
-        {(settings.length > 0 || loras.length > 0) && (
-          <p className="text-xs text-muted">
-            Settings from the image:{" "}
-            {[...settings.map((r) => `${r.label} ${r.value}`), ...loras].join(" · ")}
-          </p>
-        )}
+        <ImageSettings settings={fields.settings} />
         {error && <p className="text-xs text-danger">{error}</p>}
         <DialogActions>
           <Button onClick={close}>Cancel</Button>
           <button type="submit" disabled={saving || adding > 0} className={PRIMARY}>
-            {editor.mode === "new" ? "Save" : "Save changes"}
+            {MODE_TEXT[editor.mode].submit}
           </button>
         </DialogActions>
       </form>

@@ -1,11 +1,32 @@
 """Turn a file's bytes into RawMetadata: dimensions plus every text payload found."""
 
 from comfylens.metadata.blobs import classify
-from comfylens.metadata.jpeg import SOI, read_jpeg
+from comfylens.metadata.jpeg import SOI, decode_user_comment, read_jpeg
 from comfylens.metadata.png import SIGNATURE, read_png
-from comfylens.metadata.types import RawMetadata, Scan
+from comfylens.metadata.rewrite import CannotRewrite, replace_png_texts
+from comfylens.metadata.strip import CannotStrip, strip_metadata
+from comfylens.metadata.tags import CannotTag, hash_content, write_tags
+from comfylens.metadata.types import Format, RawMetadata, Scan, Status, is_api_node
+from comfylens.metadata.xmp import MAX_TAG_LENGTH, MAX_TAGS
 
-__all__ = ["RawMetadata", "UnsupportedFormat", "read_metadata"]
+__all__ = [
+    "MAX_TAGS",
+    "MAX_TAG_LENGTH",
+    "CannotRewrite",
+    "CannotStrip",
+    "CannotTag",
+    "Format",
+    "RawMetadata",
+    "Status",
+    "UnsupportedFormat",
+    "decode_user_comment",
+    "hash_content",
+    "is_api_node",
+    "read_metadata",
+    "replace_png_texts",
+    "strip_metadata",
+    "write_tags",
+]
 
 
 class UnsupportedFormat(ValueError):
@@ -35,6 +56,7 @@ def read_metadata(data: bytes | memoryview) -> RawMetadata:
         workflow_key=found.workflow_key,
         workflow=found.workflow,
         warnings=scan.warnings + found.warnings,
+        tags=scan.tags,
     )
 
 

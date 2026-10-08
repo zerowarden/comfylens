@@ -1,9 +1,9 @@
-import { useQueries } from "@tanstack/react-query";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useQueries, type UseQueryResult } from "@tanstack/react-query";
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import { api } from "../api/client";
-import type { ImageItem, ImagesPage, SortKey } from "../api/types";
+import type { Filters, ImageItem, Sort, SortKey } from "../api/types";
 import { isTyping } from "../lib/dom";
 import { fmtInt } from "../lib/format";
 import { useElementWidth } from "../lib/hooks";
@@ -14,7 +14,7 @@ import { SORT_KEYS, useFilters } from "../state/filters";
 import { hiddenCount, marqueeSelect, useSelection } from "../state/selection";
 import { TILE_MAX, TILE_MIN, useUi } from "../state/ui";
 import Tile from "./Tile";
-import { Button, ErrorState, FIELD } from "./ui";
+import { Button, ErrorState, FIELD, Slider } from "./ui";
 
 const PAD = 8;
 const GAP = 6;
@@ -69,12 +69,13 @@ function Toolbar({ total }: { total: number }) {
       </Button>
       <label className="flex items-center gap-1 text-xs text-muted">
         Size
-        <input
-          type="range"
+        <Slider
+          label="Tile size"
           min={TILE_MIN}
           max={TILE_MAX}
           value={tileSize}
-          onChange={(e) => setTileSize(Number(e.target.value))}
+          onChange={setTileSize}
+          className="w-24"
         />
       </label>
     </div>
@@ -115,25 +116,209 @@ function SelectionBanner({ order }: { order: number[] }) {
   );
 }
 
-export default function Grid() {
-  const { order, filters, sort, key, query } = useImageOrder();
-  const tileSize = useUi((s) => s.tileSize);
-  const openDetail = useUi((s) => s.openDetail);
-  // The detail and Compare views own the keyboard while open.
-  const detailOpen = useUi((s) => s.detailId !== null || s.compareIds !== null);
-  const selected = useSelection((s) => s.selected);
-  const click = useSelection((s) => s.click);
-  const selectAllIds = useSelection((s) => s.selectAll);
+/** The integers from `first` to `last`, both included; none when `last` comes first. */
+const range = (first: number, last: number) =>
+  Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => first + i);
+
+interface Layout {
+  cell: number;
+  columns: number;
+  rows: number;
+}
+
+/** The marquee as a box in content coordinates. */
+const marqueeBox = (m: Marquee) => ({
+  left: Math.min(m.x0, m.x1),
+  top: Math.min(m.y0, m.y1),
+  width: Math.abs(m.x1 - m.x0),
+  height: Math.abs(m.y1 - m.y0),
+});
+
+/** The cells along one axis that a span of the content touches. */
+const cellsUnder = (from: number, length: number, cell: number, count: number) =>
+  range(
+    Math.max(0, Math.floor((from - PAD) / cell)),
+    Math.min(count - 1, Math.floor((from + length - PAD) / cell)),
+  );
+
+/** The ids of the tiles the marquee touches, row by row. */
+function coveredIds(m: Marquee, { cell, columns, rows }: Layout, order: number[]): number[] {
+  const box = marqueeBox(m);
+  const cols = cellsUnder(box.left, box.width, cell, columns);
+  return cellsUnder(box.top, box.height, cell, rows)
+    .flatMap((r) => cols.map((c) => order[r * columns + c]))
+    .filter((id): id is number => id !== undefined);
+}
+
+/** Where a mouse event falls in the scroller's content. */
+function contentPoint(scroller: HTMLElement, e: { clientX: number; clientY: number }) {
+  const rect = scroller.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top + scroller.scrollTop };
+}
+
+/** The click that follows a drag released over its starting tile must not reselect it. */
+function swallowNextClick(): void {
+  const swallow = (c: globalThis.MouseEvent) => c.stopPropagation();
+  window.addEventListener("click", swallow, { capture: true, once: true });
+  window.setTimeout(() => window.removeEventListener("click", swallow, true));
+}
+
+/**
+ * Marquee: drag from anywhere in the grid, tiles included; Ctrl adds to the selection at drag
+ * start. A press on a tile stays a click until the pointer moves past DRAG_THRESHOLD; a click on
+ * empty space clears the selection.
+ */
+function useMarquee(scroller: HTMLDivElement | null, covered: (m: Marquee) => number[]) {
   const setSelected = useSelection((s) => s.setSelected);
   const clearSelection = useSelection((s) => s.clear);
-  const openMenu = useFileActions((s) => s.openMenu);
+  const [marquee, setMarquee] = useState<Marquee | null>(null);
+  const marqueeRef = useRef<Marquee | null>(null);
+  const show = (m: Marquee | null) => {
+    marqueeRef.current = m;
+    setMarquee(m);
+  };
 
-  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
-  const width = useElementWidth(scroller);
+  const onMouseDown = (e: MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || !scroller) return;
+    const { x, y } = contentPoint(scroller, e);
+    if (x > scroller.clientWidth) return; // the scrollbar
+    e.preventDefault();
+    show({
+      x0: x,
+      y0: y,
+      x1: x,
+      y1: y,
+      base: useSelection.getState().selected,
+      additive: e.ctrlKey || e.metaKey,
+      onTile: (e.target as HTMLElement).closest("[data-tile]") !== null,
+      moved: false,
+    });
+  };
+
+  useEffect(() => {
+    if (!marquee || !scroller) return;
+    const onMove = (e: globalThis.MouseEvent) => {
+      const current = marqueeRef.current;
+      if (!current) return;
+      const { x: x1, y: y1 } = contentPoint(scroller, e);
+      const moved = current.moved || Math.hypot(x1 - current.x0, y1 - current.y0) > DRAG_THRESHOLD;
+      if (!moved) return;
+      const next = { ...current, x1, y1, moved };
+      show(next);
+      setSelected(marqueeSelect(next.base, covered(next), next.additive));
+    };
+    const onUp = () => {
+      const current = marqueeRef.current;
+      if (current?.moved) swallowNextClick();
+      else if (current && !current.onTile && !current.additive) clearSelection();
+      show(null);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [marquee !== null, scroller, covered, setSelected, clearSelection]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { marquee, onMouseDown };
+}
+
+type GridKey = "selectAll" | "clear" | "open";
+const GRID_KEYS: Partial<Record<string, GridKey>> = { Escape: "clear", Enter: "open" };
+
+/** The grid's action for a key press, if any. */
+const gridKey = (e: KeyboardEvent): GridKey | undefined =>
+  (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" ? "selectAll" : GRID_KEYS[e.key];
+
+/** Keyboard: Ctrl+A selects every filtered image, Esc clears, Enter opens the anchor. The detail
+ * and Compare views own the keyboard while open. */
+function useGridKeys(order: number[]): void {
+  const openDetail = useUi((s) => s.openDetail);
+  const viewOpen = useUi((s) => s.detailId !== null || s.compareIds !== null);
+  const selectAll = useSelection((s) => s.selectAll);
+  const clearSelection = useSelection((s) => s.clear);
+  useEffect(() => {
+    const actions: Record<GridKey, (e: KeyboardEvent) => void> = {
+      selectAll: (e) => {
+        e.preventDefault();
+        selectAll(order);
+      },
+      clear: () => clearSelection(),
+      open: () => {
+        const anchor = useSelection.getState().anchor;
+        if (anchor !== null) openDetail(anchor);
+      },
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const action = gridKey(e);
+      if (action && !viewOpen && !isTyping(e.target)) actions[action](e);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewOpen, order, selectAll, clearSelection, openDetail]);
+}
+
+/** The grid pages holding the images from `first` to `last`, fetched as they are needed. */
+function useVisiblePages(
+  { filters, sort, key }: { filters: Filters; sort: Sort; key: string },
+  [first, last]: [number, number],
+) {
+  const pages = useMemo(
+    () => (last < 0 ? [] : range(Math.floor(first / PAGE), Math.floor(last / PAGE))),
+    [first, last],
+  );
+  const results = useQueries({
+    queries: pages.map((page) => ({
+      queryKey: ["page", key, page],
+      queryFn: () => api.images({ filters, sort, offset: page * PAGE, limit: PAGE }),
+      staleTime: 60_000,
+    })),
+  });
+  const loaded = new Map(
+    pages.flatMap((page, i) => {
+      const data = results[i]?.data;
+      return data ? [[page, data] as const] : [];
+    }),
+  );
+  return (index: number): ImageItem | undefined =>
+    loaded.get(Math.floor(index / PAGE))?.items[index % PAGE];
+}
+
+/** Columns of tiles at least `tileSize` wide that fill `width`, and the rows `count` needs. */
+function gridLayout(width: number, tileSize: number, count: number): Layout {
   const inner = Math.max(0, width - 2 * PAD);
   const columns = Math.max(1, Math.floor(inner / tileSize));
   const cell = inner > 0 ? inner / columns : tileSize;
-  const rows = Math.ceil(order.length / columns);
+  return { cell, columns, rows: Math.ceil(count / columns) };
+}
+
+/** The indexes of the first and last image in the rendered rows. */
+function renderedRange(rows: VirtualItem[], columns: number, count: number): [number, number] {
+  const first = rows[0]?.index ?? 0;
+  const last = rows.at(-1)?.index ?? 0;
+  return [first * columns, Math.min(count - 1, (last + 1) * columns - 1)];
+}
+
+/** An error, or the note that no image matches. */
+function GridStatus({ query, empty }: { query: UseQueryResult; empty: boolean }) {
+  if (query.isError) return <ErrorState error={query.error} />;
+  if (query.isSuccess && empty) {
+    return <div className="p-8 text-center text-muted">No images match the filters.</div>;
+  }
+  return null;
+}
+
+export default function Grid() {
+  const imageOrder = useImageOrder();
+  const { order, query } = imageOrder;
+  const tileSize = useUi((s) => s.tileSize);
+  const openDetail = useUi((s) => s.openDetail);
+  const selected = useSelection((s) => s.selected);
+  const click = useSelection((s) => s.click);
+  const openMenu = useFileActions((s) => s.openMenu);
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  const { cell, columns, rows } = gridLayout(useElementWidth(scroller), tileSize, order.length);
 
   // The React Compiler notice for this hook does not apply: this build does not use the compiler.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -149,31 +334,7 @@ export default function Grid() {
 
   // Fetch only the pages the visible rows (plus overscan) need.
   const virtualRows = virtualizer.getVirtualItems();
-  const firstIndex = (virtualRows[0]?.index ?? 0) * columns;
-  const lastIndex = Math.min(
-    order.length - 1,
-    ((virtualRows.at(-1)?.index ?? 0) + 1) * columns - 1,
-  );
-  const pages = useMemo(() => {
-    if (lastIndex < 0) return [];
-    const out: number[] = [];
-    for (let p = Math.floor(firstIndex / PAGE); p <= Math.floor(lastIndex / PAGE); p++) out.push(p);
-    return out;
-  }, [firstIndex, lastIndex]);
-  const pageResults = useQueries({
-    queries: pages.map((page) => ({
-      queryKey: ["page", key, page],
-      queryFn: () => api.images({ filters, sort, offset: page * PAGE, limit: PAGE }),
-      staleTime: 60_000,
-    })),
-  });
-  const loaded = new Map<number, ImagesPage>();
-  pages.forEach((page, i) => {
-    const data = pageResults[i]?.data;
-    if (data) loaded.set(page, data);
-  });
-  const itemAt = (index: number): ImageItem | undefined =>
-    loaded.get(Math.floor(index / PAGE))?.items[index % PAGE];
+  const itemAt = useVisiblePages(imageOrder, renderedRange(virtualRows, columns, order.length));
 
   const onTileClick = useCallback(
     (id: number, e: MouseEvent) => {
@@ -189,114 +350,19 @@ export default function Grid() {
     (id: number, e: MouseEvent) => {
       e.preventDefault();
       const { selected: current } = useSelection.getState();
-      let ids = [id];
-      if (current.has(id)) ids = order.filter((i) => current.has(i));
-      else click(id, { ctrl: false, shift: false }, order);
+      if (!current.has(id)) click(id, { ctrl: false, shift: false }, order);
+      const ids = current.has(id) ? order.filter((i) => current.has(i)) : [id];
       openMenu({ x: e.clientX, y: e.clientY, ids });
     },
     [click, order, openMenu],
   );
 
-  // Keyboard: Ctrl+A selects every filtered image, Esc clears, Enter opens the anchor.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (detailOpen || isTyping(e.target)) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        selectAllIds(order);
-      } else if (e.key === "Escape") {
-        clearSelection();
-      } else if (e.key === "Enter") {
-        const anchor = useSelection.getState().anchor;
-        if (anchor !== null) openDetail(anchor);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [detailOpen, order, selectAllIds, clearSelection, openDetail]);
-
-  // Marquee: drag from anywhere in the grid, tiles included; Ctrl adds to the selection at drag
-  // start. A press on a tile stays a click until the pointer moves past DRAG_THRESHOLD.
-  const [marquee, setMarquee] = useState<Marquee | null>(null);
-  const marqueeRef = useRef<Marquee | null>(null);
+  useGridKeys(order);
   const covered = useCallback(
-    (m: Marquee): number[] => {
-      const left = Math.min(m.x0, m.x1) - PAD;
-      const right = Math.max(m.x0, m.x1) - PAD;
-      const top = Math.min(m.y0, m.y1) - PAD;
-      const bottom = Math.max(m.y0, m.y1) - PAD;
-      const c0 = Math.max(0, Math.floor(left / cell));
-      const c1 = Math.min(columns - 1, Math.floor(right / cell));
-      const r0 = Math.max(0, Math.floor(top / cell));
-      const r1 = Math.min(rows - 1, Math.floor(bottom / cell));
-      const ids: number[] = [];
-      for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) {
-          const id = order[r * columns + c];
-          if (id !== undefined) ids.push(id);
-        }
-      }
-      return ids;
-    },
+    (m: Marquee) => coveredIds(m, { cell, columns, rows }, order),
     [cell, columns, rows, order],
   );
-
-  const onMouseDown = (e: MouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || !scroller) return;
-    const rect = scroller.getBoundingClientRect();
-    if (e.clientX > rect.left + scroller.clientWidth) return; // the scrollbar
-    e.preventDefault();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top + scroller.scrollTop;
-    const start: Marquee = {
-      x0: x,
-      y0: y,
-      x1: x,
-      y1: y,
-      base: useSelection.getState().selected,
-      additive: e.ctrlKey || e.metaKey,
-      onTile: (e.target as HTMLElement).closest("[data-tile]") !== null,
-      moved: false,
-    };
-    marqueeRef.current = start;
-    setMarquee(start);
-  };
-
-  useEffect(() => {
-    if (!marquee || !scroller) return;
-    const onMove = (e: globalThis.MouseEvent) => {
-      const current = marqueeRef.current;
-      if (!current) return;
-      const rect = scroller.getBoundingClientRect();
-      const x1 = e.clientX - rect.left;
-      const y1 = e.clientY - rect.top + scroller.scrollTop;
-      const moved = current.moved || Math.hypot(x1 - current.x0, y1 - current.y0) > DRAG_THRESHOLD;
-      if (!moved) return;
-      const next = { ...current, x1, y1, moved };
-      marqueeRef.current = next;
-      setMarquee(next);
-      setSelected(marqueeSelect(next.base, covered(next), next.additive));
-    };
-    const onUp = () => {
-      const current = marqueeRef.current;
-      if (current?.moved) {
-        // The click that follows a drag released over its starting tile must not reselect it.
-        const swallow = (c: globalThis.MouseEvent) => c.stopPropagation();
-        window.addEventListener("click", swallow, { capture: true, once: true });
-        window.setTimeout(() => window.removeEventListener("click", swallow, true));
-      } else if (current && !current.onTile && !current.additive) {
-        clearSelection(); // click on empty space
-      }
-      marqueeRef.current = null;
-      setMarquee(null);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [marquee !== null, scroller, covered, setSelected, clearSelection]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { marquee, onMouseDown } = useMarquee(scroller, covered);
 
   const size = Math.max(0, cell - GAP);
   return (
@@ -308,10 +374,7 @@ export default function Grid() {
         onMouseDown={onMouseDown}
         className="relative min-h-0 flex-1 overflow-y-auto select-none"
       >
-        {query.isError && <ErrorState error={query.error} />}
-        {query.isSuccess && order.length === 0 && (
-          <div className="p-8 text-center text-muted">No images match the filters.</div>
-        )}
+        <GridStatus query={query} empty={order.length === 0} />
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualRows.map((row) => (
             <div
@@ -319,25 +382,25 @@ export default function Grid() {
               className="absolute flex"
               style={{ top: row.start, left: PAD, height: cell, gap: GAP }}
             >
-              {Array.from({ length: columns }, (_, c) => {
-                const index = row.index * columns + c;
+              {range(row.index * columns, (row.index + 1) * columns - 1).map((index) => {
                 // While the id list still holds the previous filter's page, a fetched item can
                 // belong to another image. Take the id from the item so the thumbnail and the
                 // click target always agree.
                 const item = itemAt(index);
                 const id = item?.id ?? order[index];
-                if (id === undefined) return null;
                 return (
-                  <Tile
-                    key={id}
-                    id={id}
-                    item={item}
-                    size={size}
-                    selected={selected.has(id)}
-                    onClick={onTileClick}
-                    onOpen={openDetail}
-                    onContextMenu={onTileContextMenu}
-                  />
+                  id !== undefined && (
+                    <Tile
+                      key={id}
+                      id={id}
+                      item={item}
+                      size={size}
+                      selected={selected.has(id)}
+                      onClick={onTileClick}
+                      onOpen={openDetail}
+                      onContextMenu={onTileContextMenu}
+                    />
+                  )
                 );
               })}
             </div>
@@ -346,12 +409,7 @@ export default function Grid() {
         {marquee?.moved && (
           <div
             className="pointer-events-none absolute border border-accent bg-accent/10"
-            style={{
-              left: Math.min(marquee.x0, marquee.x1),
-              top: Math.min(marquee.y0, marquee.y1),
-              width: Math.abs(marquee.x1 - marquee.x0),
-              height: Math.abs(marquee.y1 - marquee.y0),
-            }}
+            style={marqueeBox(marquee)}
           />
         )}
       </div>

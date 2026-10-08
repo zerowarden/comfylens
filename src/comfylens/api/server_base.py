@@ -5,10 +5,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from comfylens.analytics.snapshot import SnapshotStore
+from comfylens.analytics import SnapshotStore
 from comfylens.api.errors import no_catalog
-from comfylens.collection.store import CollectionStore
-from comfylens.db.connection import CatalogMissing, connect_readonly
+from comfylens.collection import CollectionStore
+from comfylens.db import CatalogMissing, connect_readonly
 
 # How many memoized search and collection-lookup results to keep, keyed by snapshot revision.
 CACHE_SIZE = 64

@@ -27,6 +27,7 @@ def facets(snap: Snapshot) -> dict[str, Any]:
     gens = images.filter(pl.col("has_generation"))
     lora_files = snap.loras.group_by("name").agg(pl.col("file_id").n_unique().alias("count"))
     result = {
+        "tags": _counts(images["tags"].explode(empty_as_null=False)),
         "families": _counts(images["model_family"].fill_null(NO_METADATA)),
         "base_models": _counts(gens["base_model"]),
         "samplers": _counts(gens["sampler_name"]),

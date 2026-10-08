@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { IndexStatusModel, LibraryInfo } from "../api/types";
 import { fmtInt } from "../lib/format";
-import { indexPollInterval, runLanded } from "../lib/indexing";
+import { fixNotice, indexPollInterval, runLanded } from "../lib/indexing";
+import { useFileActions } from "../state/fileActions";
 import { useUi } from "../state/ui";
 import { Glyph } from "./icons";
-import { Button, Segmented } from "./ui";
+import { Modal } from "./Modal";
+import { Button, DialogActions, PRIMARY, Segmented, ShareBar } from "./ui";
 
 /** Poll the indexer, and refresh all data once a run lands. */
 function useIndexStatus() {
@@ -55,17 +57,18 @@ function useIndexStatus() {
   return { status: status.data, library: library.data };
 }
 
+/** States that count files: the bar shows how many are done. */
+const COUNTED = new Set<IndexStatusModel["state"]>(["fixing", "processing"]);
+
 function Progress({ status }: { status: IndexStatusModel }) {
   if (status.state === "idle") return null;
   const share = status.total > 0 ? status.done / status.total : 0;
   return (
-    <div className="flex items-center gap-2 text-xs text-muted">
+    <div className="flex items-center gap-2 text-xs text-muted motion-safe:animate-fade-in">
       <span className="capitalize">{status.state}</span>
-      {status.state === "processing" && (
+      {COUNTED.has(status.state) && (
         <>
-          <div className="h-1.5 w-40 rounded bg-track">
-            <div className="h-1.5 rounded bg-accent" style={{ width: `${share * 100}%` }} />
-          </div>
+          <ShareBar share={share} className="w-40" />
           <span className="tabular-nums">
             {fmtInt(status.done)} / {fmtInt(status.total)}
           </span>
@@ -107,30 +110,150 @@ function ThemeToggle() {
   );
 }
 
-export default function TopBar() {
-  const queryClient = useQueryClient();
-  const { status, library } = useIndexStatus();
-  const panelOpen = useUi((s) => s.panelOpen);
-  const setPanelOpen = useUi((s) => s.setPanelOpen);
-  const view = useUi((s) => s.view);
-  const setView = useUi((s) => s.setView);
-  const [notice, setNotice] = useState<string | null>(null);
+/** The library's root and size, and badges for watch mode and suspect timestamps. */
+function LibraryBadges({ library }: { library: LibraryInfo }) {
+  return (
+    <>
+      <span className="min-w-0 truncate font-mono text-xs text-muted" title={library.root}>
+        {library.root}
+      </span>
+      <span className="text-xs text-muted tabular-nums">{fmtInt(library.total)} files</span>
+      {library.watching && (
+        <span
+          className="flex items-center gap-1 rounded bg-success/15 px-1.5 py-0.5 text-xs text-success"
+          title="Watching the library: new and changed files are indexed automatically"
+        >
+          <span aria-hidden="true">●</span> watching
+        </span>
+      )}
+      {library.timestamp_suspect > 0 && (
+        <span
+          className="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning"
+          title="Files whose modification times look like a bulk copy rather than generation"
+        >
+          {fmtInt(library.timestamp_suspect)} suspect timestamps
+        </span>
+      )}
+    </>
+  );
+}
 
+const runError = (action: string, error: Error) =>
+  error instanceof ApiError && error.status === 409
+    ? "An index run is already in progress"
+    : `${action} failed: ${error.message}`;
+
+/** Report each Fix run once it has landed: its files re-read and the new data served. */
+function useFixNotice(status: IndexStatusModel | undefined) {
+  const notify = useFileActions((s) => s.notify);
+  const seen = useRef<number | null | undefined>(undefined);
+  const fix = status?.last_fix ?? null;
+  useEffect(() => {
+    if (!status || status.state !== "idle") return;
+    const finished = fix?.finished_at ?? null;
+    // The first answer only sets what was already known: a run from before the page loaded.
+    if (seen.current !== undefined && fix && finished !== seen.current) notify(fixNotice(fix));
+    seen.current = finished;
+  }, [status, fix, notify]);
+}
+
+/** The Fix button, and the confirmation it asks for: files are rewritten in place. */
+function FixButton({
+  busy,
+  onError,
+}: {
+  busy: boolean;
+  onError: (message: string | null) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const fix = useMutation({
+    mutationFn: api.fix,
+    onSuccess: (data) => {
+      onError(null);
+      queryClient.setQueryData(["index-status"], data);
+    },
+    onError: (error) => onError(runError("Fix", error)),
+  });
+  const close = () => setConfirming(false);
+  return (
+    <>
+      <Button
+        onClick={() => setConfirming(true)}
+        disabled={busy || fix.isPending}
+        title="Rewrite the library's image metadata to fix known problems"
+      >
+        Fix
+      </Button>
+      {confirming && (
+        <Modal title="Fix the library?" onClose={close}>
+          <p className="mb-2 text-sm">
+            Rewrites the metadata of images that name LoRAs which cannot affect them: connected to
+            nothing, or switched off in a Power Lora Loader. Those LoRAs leave the prompt and the
+            workflow.
+          </p>
+          <p className="mb-4 text-xs text-muted">
+            The files are changed in place, PNG only. Pixels, tags and modification times stay, and
+            saved prompts keep their links. There is no undo.
+          </p>
+          <DialogActions>
+            <Button onClick={close}>Cancel</Button>
+            <button
+              type="button"
+              autoFocus
+              className={PRIMARY}
+              onClick={() => {
+                close();
+                fix.mutate();
+              }}
+            >
+              Fix
+            </button>
+          </DialogActions>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/** Indexing progress, the last run's error, and the Rescan and Fix buttons. */
+function Indexing({ status }: { status: IndexStatusModel | undefined }) {
+  const queryClient = useQueryClient();
+  const [notice, setNotice] = useState<string | null>(null);
+  useFixNotice(status);
   const rescan = useMutation({
     mutationFn: api.rescan,
     onSuccess: (data) => {
       setNotice(null);
       queryClient.setQueryData(["index-status"], data);
     },
-    onError: (error) =>
-      setNotice(
-        error instanceof ApiError && error.status === 409
-          ? "An index run is already in progress"
-          : `Rescan failed: ${error.message}`,
-      ),
+    onError: (error) => setNotice(runError("Rescan", error)),
   });
-
   const running = status !== undefined && status.state !== "idle";
+  const lastError = running ? null : status?.last_error;
+  return (
+    <>
+      {status && <Progress status={status} />}
+      {lastError && (
+        <span className="max-w-64 truncate text-xs text-danger" title={lastError}>
+          {lastError}
+        </span>
+      )}
+      {notice && <span className="text-xs text-warning">{notice}</span>}
+      <Button onClick={() => rescan.mutate()} disabled={running || rescan.isPending}>
+        Rescan
+      </Button>
+      <FixButton busy={running} onError={setNotice} />
+    </>
+  );
+}
+
+export default function TopBar() {
+  const { status, library } = useIndexStatus();
+  const panelOpen = useUi((s) => s.panelOpen);
+  const setPanelOpen = useUi((s) => s.setPanelOpen);
+  const view = useUi((s) => s.view);
+  const setView = useUi((s) => s.setView);
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
       <span className="font-semibold">ComfyLens</span>
@@ -142,39 +265,9 @@ export default function TopBar() {
         ]}
         onChange={setView}
       />
-      <span className="min-w-0 truncate font-mono text-xs text-muted" title={library?.root}>
-        {library?.root}
-      </span>
-      {library && (
-        <span className="text-xs text-muted tabular-nums">{fmtInt(library.total)} files</span>
-      )}
-      {library?.watching && (
-        <span
-          className="flex items-center gap-1 rounded bg-success/15 px-1.5 py-0.5 text-xs text-success"
-          title="Watching the library: new and changed files are indexed automatically"
-        >
-          <span aria-hidden="true">●</span> watching
-        </span>
-      )}
-      {library && library.timestamp_suspect > 0 && (
-        <span
-          className="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning"
-          title="Files whose modification times look like a bulk copy rather than generation"
-        >
-          {fmtInt(library.timestamp_suspect)} suspect timestamps
-        </span>
-      )}
+      {library && <LibraryBadges library={library} />}
       <div className="flex-1" />
-      {status && <Progress status={status} />}
-      {status?.last_error && !running && (
-        <span className="max-w-64 truncate text-xs text-danger" title={status.last_error}>
-          {status.last_error}
-        </span>
-      )}
-      {notice && <span className="text-xs text-warning">{notice}</span>}
-      <Button onClick={() => rescan.mutate()} disabled={running || rescan.isPending}>
-        Rescan
-      </Button>
+      <Indexing status={status} />
       {view === "library" && (
         <Button onClick={() => setPanelOpen(!panelOpen)} title="Toggle analysis panel">
           Analysis

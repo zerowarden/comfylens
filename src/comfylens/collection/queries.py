@@ -1,11 +1,9 @@
-"""Read models over the collection: prompt details, summaries, facets and links."""
-
 import json
 from typing import Any
 
 from comfylens.collection.models import Links, Role
 from comfylens.collection.store_base import _key_int, _StoreBase, key_hex
-from comfylens.db.connection import like_pattern, rows
+from comfylens.db import like_pattern, rows
 
 
 class QueriesMixin(_StoreBase):
@@ -46,25 +44,19 @@ class QueriesMixin(_StoreBase):
         self, q: str = "", tag: str | None = None, family: str | None = None
     ) -> list[dict[str, Any]]:
         """Summaries, most recently changed first. `q` matches text fields and tags."""
-        where: list[str] = []
-        params: list[Any] = []
-        if q.strip():
-            pattern = like_pattern(q.strip())
-            fields = ("title", "positive", "negative", "notes")
-            like = " OR ".join(f"p.{f} LIKE ? ESCAPE '\\'" for f in fields)
-            where.append(
-                f"({like} OR EXISTS (SELECT 1 FROM prompt_tags t WHERE t.prompt_id = p.id"
-                " AND t.tag LIKE ? ESCAPE '\\'))"
-            )
-            params += [pattern] * (len(fields) + 1)
-        if tag:
-            where.append(
-                "EXISTS (SELECT 1 FROM prompt_tags t WHERE t.prompt_id = p.id AND t.tag = ?)"
-            )
-            params.append(tag)
-        if family:
-            where.append("p.model_family = ?")
-            params.append(family)
+        text = q.strip()
+        fields = ("title", "positive", "negative", "notes")
+        like = " OR ".join(f"p.{f} LIKE ? ESCAPE '\\'" for f in fields)
+        tagged = "EXISTS (SELECT 1 FROM prompt_tags t WHERE t.prompt_id = p.id AND t.tag {})"
+        searched = f"({like} OR {tagged.format("LIKE ? ESCAPE '\\'")})"
+        # (clause, its parameters, the filter value that sets it)
+        filters = [
+            (searched, [like_pattern(text)] * (len(fields) + 1), text),
+            (tagged.format("= ?"), [tag], tag),
+            ("p.model_family = ?", [family], family),
+        ]
+        where = [clause for clause, _, value in filters if value]
+        params = [param for _, values, value in filters if value for param in values]
         sql = (
             "SELECT p.id, p.title, p.positive, p.model_family, p.updated_at,"
             " (SELECT json_group_array(tag) FROM (SELECT tag FROM prompt_tags"

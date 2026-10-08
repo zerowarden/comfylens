@@ -1,9 +1,10 @@
 """`comfylens report` presentation: the Rich tables over report_data.build_report."""
 
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime
 from typing import Any
 
-from rich.console import Console
+from rich.console import Console, RenderableType
 from rich.markup import escape
 from rich.table import Column, Table
 
@@ -33,9 +34,13 @@ def _range(stats: dict[str, Any]) -> str:
     return "—" if stats["min"] is None else f"{_n(stats['min'])}–{_n(stats['max'])}"
 
 
-def _table(*headers: str, title: str | None = None) -> Table:
+def _table(*headers: str, rows: Iterable[Sequence[object]], title: str | None = None) -> Table:
+    """A table of `rows`, every cell escaped."""
     columns = [Column(h, overflow="fold") for h in headers]
-    return Table(*columns, title=title, title_justify="left", title_style="bold")
+    table = Table(*columns, title=title, title_justify="left", title_style="bold")
+    for row in rows:
+        table.add_row(*(escape(str(cell)) for cell in row))
+    return table
 
 
 def _config_text(fields: dict[str, Any]) -> str:
@@ -46,10 +51,12 @@ def _config_text(fields: dict[str, Any]) -> str:
         f"{_n(fields['steps'])} steps",
         f"cfg {_n(fields['cfg'])}",
         f"denoise {_n(fields['denoise'])}",
+        *(
+            f"{name} {_n(fields[name])}"
+            for name in ("guidance", "shift")
+            if fields[name] is not None
+        ),
     ]
-    for name in ("guidance", "shift"):
-        if fields[name] is not None:
-            parts.append(f"{name} {_n(fields[name])}")
     return " | ".join(parts)
 
 
@@ -62,108 +69,137 @@ def render_report(console: Console, r: dict[str, Any]) -> None:
         console.print(
             "[yellow]The index predates the current extractor or config; re-run index.[/]"
         )
+    for title, section in _SECTIONS:
+        console.rule(title)
+        for renderable in section(r):
+            console.print(renderable)
 
+
+type _Section = list[RenderableType]
+
+
+def _files(r: dict[str, Any]) -> _Section:
     f = r["files"]
-    console.rule("1. Files")
-    table = _table("status", "format", "files")
-    for row in f["by_status_format"]:
-        table.add_row(row["status"], row["format"], str(row["files"]))
-    console.print(table)
-    console.print(f"Parse success: {f['ok']} of {f['total']} ({_pct(f['parse_success_rate'])})")
+    rows = ((row["status"], row["format"], row["files"]) for row in f["by_status_format"])
+    return [
+        _table("status", "format", "files", rows=rows),
+        f"Parse success: {f['ok']} of {f['total']} ({_pct(f['parse_success_rate'])})",
+    ]
 
-    console.rule("2. Families")
-    table = _table("family", "files")
-    for row in r["families"]["counts"]:
-        table.add_row(escape(row["family"]), str(row["files"]))
-    console.print(table)
-    if r["families"]["unknown_base_models"]:
-        table = _table("base_model", "files", title="Base models of family unknown")
-        for row in r["families"]["unknown_base_models"]:
-            table.add_row(escape(str(row["base_model"])), str(row["files"]))
-        console.print(table)
 
-    console.rule("3. Reachable classes with no handler")
-    if r["unregistered"]:
-        table = _table("class_type", "files")
-        for row in r["unregistered"]:
-            table.add_row(escape(row["class_type"]), str(row["files"]))
-        console.print(table)
-    else:
-        console.print("None.")
-
-    console.rule("4. Warnings")
-    table = _table("code", "count", "files", "")
-    for row in r["warnings"]["codes"]:
-        note = "informational: no badge" if row["informational"] else ""
-        table.add_row(row["code"], str(row["count"]), str(row["files"]), note)
-    console.print(table if r["warnings"]["codes"] else "None.")
-    if r["warnings"]["unused_loras"]:
-        table = _table("LoRA", "files", title="Most frequent unused LoRAs")
-        for row in r["warnings"]["unused_loras"]:
-            table.add_row(escape(row["name"]), str(row["files"]))
-        console.print(table)
-
-    console.rule("5. Suspect timestamp clusters")
-    if r["timestamp_clusters"]:
-        table = _table("start", "end", "files", "distinct generations")
-        for c in r["timestamp_clusters"]:
-            table.add_row(
-                _time(c["start"]), _time(c["end"]), str(c["files"]), str(c["distinct_generations"])
-            )
-        console.print(table)
-    else:
-        console.print("None.")
-
-    console.rule("6. Per family")
-    for fam in r["per_family"]:
-        console.print(f"[bold]{escape(fam['family'])}[/] ({fam['images']} unique images)")
-        table = _table("field", "mode (share)", "median", "mean", "min–max", "n")
-        for name, stats in fam["numeric"].items():
-            if stats["n"]:
-                table.add_row(
-                    name,
-                    _mode(stats),
-                    _n(stats["median"]),
-                    _n(stats["mean"]),
-                    _range(stats),
-                    str(stats["n"]),
+def _families(r: dict[str, Any]) -> _Section:
+    counts, unknown = r["families"]["counts"], r["families"]["unknown_base_models"]
+    title = "Base models of family unknown"
+    return [
+        _table("family", "files", rows=((row["family"], row["files"]) for row in counts)),
+        *(
+            [
+                _table(
+                    "base_model",
+                    "files",
+                    rows=((u["base_model"], u["files"]) for u in unknown),
+                    title=title,
                 )
-        console.print(table)
-        if fam["loras"]:
-            table = _table("LoRA", "images", "share", "strength mode", "median", "mean", "range")
-            for row in fam["loras"]:
-                st = row["strength_model"]
-                table.add_row(
-                    escape(row["name"]),
-                    str(row["images"]),
-                    _pct(row["share"]),
-                    _mode(st),
-                    _n(st["median"]),
-                    _n(st["mean"]),
-                    _range(st),
-                )
-            console.print(table)
-        table = _table("#", "count", "share", "configuration")
-        for rank, row in enumerate(fam["configs"], 1):
-            table.add_row(
-                str(rank),
-                str(row["count"]),
-                _pct(row["share"]),
-                escape(_config_text(row["fields"])),
-            )
-        console.print(table)
+            ]
+            if unknown
+            else []
+        ),
+    ]
 
-    console.rule("7. Timing (last index run that read files)")
+
+def _unregistered(r: dict[str, Any]) -> _Section:
+    rows = [(row["class_type"], row["files"]) for row in r["unregistered"]]
+    return [_table("class_type", "files", rows=rows) if rows else "None."]
+
+
+def _warnings(r: dict[str, Any]) -> _Section:
+    codes, unused = r["warnings"]["codes"], r["warnings"]["unused_loras"]
+    rows = [
+        (c["code"], c["count"], c["files"], "informational" if c["informational"] else "")
+        for c in codes
+    ]
+    title = "Most frequent unused LoRAs"
+    return [
+        _table("code", "count", "files", "", rows=rows) if rows else "None.",
+        *(
+            [_table("LoRA", "files", rows=((u["name"], u["files"]) for u in unused), title=title)]
+            if unused
+            else []
+        ),
+    ]
+
+
+def _timestamp_clusters(r: dict[str, Any]) -> _Section:
+    rows = [
+        (_time(c["start"]), _time(c["end"]), c["files"], c["distinct_generations"])
+        for c in r["timestamp_clusters"]
+    ]
+    return [_table("start", "end", "files", "distinct generations", rows=rows) if rows else "None."]
+
+
+def _per_family(r: dict[str, Any]) -> _Section:
+    return [renderable for fam in r["per_family"] for renderable in _family(fam)]
+
+
+def _family(fam: dict[str, Any]) -> _Section:
+    numeric = [
+        (name, *_summary(stats), stats["n"]) for name, stats in fam["numeric"].items() if stats["n"]
+    ]
+    loras = [
+        (row["name"], row["images"], _pct(row["share"]), *_summary(row["strength_model"]))
+        for row in fam["loras"]
+    ]
+    configs = [
+        (rank, row["count"], _pct(row["share"]), _config_text(row["fields"]))
+        for rank, row in enumerate(fam["configs"], 1)
+    ]
+    return [
+        f"[bold]{escape(fam['family'])}[/] ({fam['images']} unique images)",
+        _table("field", "mode (share)", "median", "mean", "min–max", "n", rows=numeric),
+        *(
+            [
+                _table(
+                    "LoRA",
+                    "images",
+                    "share",
+                    "strength mode",
+                    "median",
+                    "mean",
+                    "range",
+                    rows=loras,
+                )
+            ]
+            if loras
+            else []
+        ),
+        _table("#", "count", "share", "configuration", rows=configs),
+    ]
+
+
+def _summary(stats: dict[str, Any]) -> tuple[str, str, str, str]:
+    """Mode (share), median, mean and range of numeric statistics."""
+    return _mode(stats), _n(stats["median"]), _n(stats["mean"]), _range(stats)
+
+
+def _timing(r: dict[str, Any]) -> _Section:
     t = r["timing"]
     if t is None:
-        console.print("No index run recorded.")
-        return
-    console.print(
+        return ["No index run recorded."]
+    return [
         f"{t['processed']} files read, {t['reextracted']} re-extracted in {t['seconds']:.1f} s"
-        f" with {t['workers']} workers: {_n(t['total_files_per_s'])} files/s in total"
-    )
-    console.print(
+        f" with {t['workers']} workers: {_n(t['total_files_per_s'])} files/s in total",
         f"Per worker: metadata {_n(t['metadata_files_per_s_per_worker'])} files/s,"
         f" thumbnails {_n(t['thumbnail_files_per_s_per_worker'])} files/s,"
-        f" re-extraction {_n(t['reextract_files_per_s_per_worker'])} files/s"
-    )
+        f" re-extraction {_n(t['reextract_files_per_s_per_worker'])} files/s",
+    ]
+
+
+_SECTIONS: tuple[tuple[str, Callable[[dict[str, Any]], _Section]], ...] = (
+    ("1. Files", _files),
+    ("2. Families", _families),
+    ("3. Reachable classes with no handler", _unregistered),
+    ("4. Warnings", _warnings),
+    ("5. Suspect timestamp clusters", _timestamp_clusters),
+    ("6. Per family", _per_family),
+    ("7. Timing (last index run that read files)", _timing),
+)

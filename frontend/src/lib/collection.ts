@@ -65,18 +65,6 @@ export async function saveImageToCollection(id: number): Promise<void> {
   }
 }
 
-/** Open the editor on a prompt's text, e.g. a distinct prompt from prompt analysis. */
-export async function saveTextToCollection(positive: string): Promise<void> {
-  try {
-    const draft = await api.draftFromText({ positive, negative: "" });
-    useCollection.getState().openEditor({ mode: "new", draft, references: [] });
-  } catch (e) {
-    useFileActions
-      .getState()
-      .notify({ text: `Could not start a saved prompt: ${errorText(e)}`, tone: "error" });
-  }
-}
-
 /**
  * Upload files one at a time; a failed file becomes a "<name>: <message>" failure. `hooks`
  * report progress and let a caller use each draft as soon as it is stored.

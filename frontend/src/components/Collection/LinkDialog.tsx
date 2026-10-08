@@ -6,7 +6,7 @@ import { fmtInt } from "../../lib/format";
 import { useDebounced } from "../../lib/hooks";
 import { useCollection } from "../../state/collection";
 import { Modal } from "../Modal";
-import { ErrorState, FOCUS_FIELD, Thumbnail } from "../ui";
+import { ErrorState, FIELD, Thumbnail } from "../ui";
 
 function LinkForm({ ids }: { ids: number[] }) {
   const client = useQueryClient();
@@ -22,11 +22,12 @@ function LinkForm({ ids }: { ids: number[] }) {
   return (
     <Modal title={title} onClose={close}>
       <input
+        autoComplete="off"
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Search saved prompts"
         autoFocus
-        className={`mb-2 block w-full px-2 py-1 text-sm ${FOCUS_FIELD}`}
+        className={`mb-2 block w-full px-2 py-1 text-sm ${FIELD}`}
       />
       <p className="mb-2 text-xs text-muted">
         The images are linked as attempts of the prompt; nothing is copied.

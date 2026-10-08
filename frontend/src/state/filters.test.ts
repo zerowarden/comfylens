@@ -18,6 +18,7 @@ describe("URL sync", () => {
 
   it("round-trips every filter and the sort", () => {
     const filters: Filters = {
+      tags: ["fox", "a, b & c"],
       families: ["qwen-image-2.1", "(no metadata)"],
       base_models: ["flux1-dev"],
       samplers: ["euler"],
@@ -28,13 +29,13 @@ describe("URL sync", () => {
       statuses: ["ok", "error"],
       text: "realistic photograph",
       numeric: { cfg: [1.5, 3], steps: [20, 40] },
-      has_warnings: false,
       saved: true,
       saved_prompt: 12,
       sentences: ["0123456789abcdef", "fedcba9876543210"],
     };
     const sort = { key: "cfg" as const, descending: false };
     const search = toSearch(filters, sort);
+    expect(search).toContain("tag=fox");
     expect(search).toContain("family=qwen-image-2.1");
     expect(search).toContain("lora_mode=all");
     expect(search).toContain("saved=yes");
@@ -46,12 +47,11 @@ describe("URL sync", () => {
 
   it("ignores invalid values", () => {
     const { filters, sort } = fromSearch(
-      "status=bogus&status=ok&from=yesterday&cfg=3,1&steps=x,2&sort=nope&order=sideways&warnings=maybe",
+      "status=bogus&status=ok&from=yesterday&cfg=3,1&steps=x,2&sort=nope&order=sideways",
     );
     expect(filters.statuses).toEqual(["ok"]);
     expect(filters.date_from).toBeNull();
     expect(filters.numeric).toEqual({});
-    expect(filters.has_warnings).toBeNull();
     expect(sort).toEqual(defaultSort());
   });
 
@@ -62,9 +62,12 @@ describe("URL sync", () => {
       expect(filters.saved).toBeNull();
     }
     expect(fromSearch("saved=no").filters.saved).toBe(false);
+    // Object property names are not yes/no values.
+    expect(fromSearch("saved=constructor").filters.saved).toBeNull();
   });
 
-  it("counts the collection filters as active", () => {
+  it("counts the tag and collection filters as active", () => {
+    expect(hasActiveFilters({ ...emptyFilters(), tags: ["fox"] })).toBe(true);
     expect(hasActiveFilters({ ...emptyFilters(), saved: false })).toBe(true);
     expect(hasActiveFilters({ ...emptyFilters(), saved_prompt: 3 })).toBe(true);
     expect(hasActiveFilters({ ...emptyFilters(), sentences: ["0123456789abcdef"] })).toBe(true);

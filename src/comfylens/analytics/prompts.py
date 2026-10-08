@@ -4,6 +4,7 @@ Prompts repeat heavily, so each distinct prompt is segmented once into frames ke
 prompt key; a query joins the scope's image count per key onto them and aggregates in Polars.
 """
 
+import itertools
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ import xxhash
 from comfylens.analytics.loras import EXAMPLES, recent_examples
 from comfylens.analytics.text import load_stopwords, sentences, units
 from comfylens.config import PromptsConfig
-from comfylens.extract.normalize import prompt_key
+from comfylens.extract import prompt_key
 
 Side = Literal["positive", "negative"]
 # Whether each image counts once, or each distinct prompt does.
@@ -285,7 +286,21 @@ def _clusters(
         candidates = candidates.filter(~pl.col("sentence").is_in(excluded.implode()))
     candidates = candidates.sort("df", "text", descending=[True, False]).head(CLUSTER_CANDIDATES)
     rows = list(candidates.select("sentence", "text", "df").iter_rows())
+    clusters = [
+        cluster
+        for group in _similar_groups(rows, similarity)
+        if (cluster := _cluster(frames, keyed, group, total)) is not None
+    ]
+    clusters.sort(key=lambda cluster: (-cluster["images"], cluster["text"]))
+    return clusters[:TOP_CLUSTERS]
 
+
+type _SentenceRow = tuple[int, str, int]  # hash, text, document frequency
+
+
+def _similar_groups(rows: list[_SentenceRow], similarity: float) -> list[list[_SentenceRow]]:
+    """Rows joined through any chain of similar pairs (union-find), groups of two or more, each
+    most frequent first."""
     parent = list(range(len(rows)))
 
     def find(i: int) -> int:
@@ -294,48 +309,43 @@ def _clusters(
             i = parent[i]
         return i
 
-    for i in range(len(rows)):
-        for j in range(i + 1, len(rows)):
-            if _similar(rows[i][1], rows[j][1], similarity):
-                parent[find(j)] = find(i)
-
-    members: dict[int, list[tuple[int, str, int]]] = {}
+    for i, j in itertools.combinations(range(len(rows)), 2):
+        if _similar(rows[i][1], rows[j][1], similarity):
+            parent[find(j)] = find(i)
+    members: dict[int, list[_SentenceRow]] = {}
     for i, row in enumerate(rows):
         members.setdefault(find(i), []).append(row)
+    return [sorted(g, key=lambda r: (-r[2], r[1])) for g in members.values() if len(g) > 1]
 
-    out: list[dict[str, Any]] = []
-    for group in members.values():
-        if len(group) < 2:
-            continue
-        group.sort(key=lambda r: (-r[2], r[1]))
-        hashes = [hash_ for hash_, _text, _df in group]
-        matched = keyed.join(
-            frames.sentences.filter(pl.col("sentence").is_in(hashes)).select("key").unique(),
-            on="key",
-        )
-        if matched.height == 0:
-            continue
-        examples = matched.select(
-            recent_examples("id").head(EXAMPLES).implode().alias("examples"),
-            recent_examples("content_hash").head(EXAMPLES).implode().alias("example_hashes"),
-        ).row(0)
-        rep_hash, rep_text, _ = group[0]
-        out.append(
-            {
-                "key": f"{rep_hash:016x}",
-                "text": rep_text,
-                "images": matched.height,
-                "prompts": matched["key"].n_unique(),
-                "members": [
-                    {"key": f"{hash_:016x}", "text": text, "df": df, "share": df / total}
-                    for hash_, text, df in group
-                ],
-                "examples": examples[0],
-                "example_hashes": examples[1],
-            }
-        )
-    out.sort(key=lambda cluster: (-cluster["images"], cluster["text"]))
-    return out[:TOP_CLUSTERS]
+
+def _cluster(
+    frames: PromptFrames, keyed: pl.DataFrame, group: list[_SentenceRow], total: int
+) -> dict[str, Any] | None:
+    """A group's images and examples; None when no image in scope holds it."""
+    hashes = [hash_ for hash_, _text, _df in group]
+    matched = keyed.join(
+        frames.sentences.filter(pl.col("sentence").is_in(hashes)).select("key").unique(),
+        on="key",
+    )
+    if matched.height == 0:
+        return None
+    examples, example_hashes = matched.select(
+        recent_examples("id").head(EXAMPLES).implode(),
+        recent_examples("content_hash").head(EXAMPLES).implode(),
+    ).row(0)
+    rep_hash, rep_text, _ = group[0]
+    return {
+        "key": f"{rep_hash:016x}",
+        "text": rep_text,
+        "images": matched.height,
+        "prompts": matched["key"].n_unique(),
+        "members": [
+            {"key": f"{hash_:016x}", "text": text, "df": df, "share": df / total}
+            for hash_, text, df in group
+        ],
+        "examples": examples,
+        "example_hashes": example_hashes,
+    }
 
 
 def _drop_subsumed(counts: pl.DataFrame) -> pl.DataFrame:

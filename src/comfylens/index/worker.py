@@ -9,13 +9,9 @@ from pathlib import Path
 from time import perf_counter
 from typing import Literal
 
-import xxhash
-
 from comfylens.config import Config
-from comfylens.extract.pipeline import Outcome, describe, extract_outcome
-from comfylens.extract.types import Extraction
-from comfylens.metadata import read_metadata
-from comfylens.metadata.types import Format, Status
+from comfylens.extract import Extraction, Outcome, describe, extract_outcome
+from comfylens.metadata import Format, Status, hash_content, read_metadata
 from comfylens.paths import thumb_path
 from comfylens.thumbs import make_thumbnail
 from comfylens.warn import Code, Warn
@@ -72,6 +68,7 @@ class ParsedFile:
     sources: dict[str, str] = field(default_factory=dict)
     prompt_key: str | None = None
     workflow_key: str | None = None
+    tags: list[str] = field(default_factory=list)
     read_warnings: list[Warn] = field(default_factory=list)  # reading and thumbnail stages
     seconds_metadata: float = 0.0
     seconds_thumbnail: float = 0.0
@@ -93,7 +90,7 @@ def process_file(job: Job, settings: Settings) -> ParsedFile:
         data = (settings.root / job.rel_path).read_bytes()
     except OSError as e:
         return ParsedFile(job, "", fallback, None, None, Extracted("error", describe(e)))
-    content_hash = xxhash.xxh3_128_hexdigest(data)
+    content_hash = hash_content(data)
 
     try:
         raw = read_metadata(data)
@@ -117,6 +114,7 @@ def process_file(job: Job, settings: Settings) -> ParsedFile:
             sources=raw.sources,
             prompt_key=raw.api_prompt_key,
             workflow_key=raw.workflow_key,
+            tags=raw.tags,
             read_warnings=list(raw.warnings),
         )
     parsed.seconds_metadata = perf_counter() - start
@@ -136,7 +134,7 @@ def restore_thumbnail(job: ThumbJob, settings: Settings) -> ThumbOutcome:
     fails: its thumbnail would be filed under another image's key."""
     try:
         data = (settings.root / job.rel_path).read_bytes()
-        if xxhash.xxh3_128_hexdigest(data) != job.content_hash:
+        if hash_content(data) != job.content_hash:
             return "failed"
         return "written" if _thumbnail(data, job.content_hash, settings) else "exists"
     except Exception:

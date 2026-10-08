@@ -247,10 +247,6 @@ def test_seed_2_64_minus_1_round_trips(tmp_path: Path, config: Config):
     run(tmp_path / "lib", config)
     assert rows(tmp_path / "lib", "SELECT seed FROM generations") == [("18446744073709551615",)]
     assert rows(tmp_path / "lib", "SELECT seed FROM sampler_stages") == [("18446744073709551615",)]
-    ((value,),) = rows(
-        tmp_path / "lib", "SELECT value_num FROM node_inputs WHERE input_name = 'seed'"
-    )
-    assert value == float(2**64 - 1)
 
 
 def test_golden_rows(library: Path, config: Config):
@@ -384,7 +380,7 @@ def test_process_pool_matches_inline(
         dumps.append(
             [
                 rows(library, f"SELECT * FROM {table} ORDER BY 1, 2")
-                for table in ("generations", "loras", "nodes", "node_inputs", "warnings")
+                for table in ("generations", "loras", "nodes", "warnings")
             ]
         )
     assert dumps[0] == dumps[1]
@@ -405,7 +401,7 @@ def test_reextraction_through_the_pool_matches_inline(
         dumps.append(
             [
                 rows(library, f"SELECT * FROM {table} ORDER BY 1, 2")
-                for table in ("generations", "loras", "nodes", "node_inputs", "warnings")
+                for table in ("generations", "loras", "nodes", "warnings")
             ]
         )
     assert dumps[0] == dumps[1]
@@ -440,16 +436,3 @@ def test_every_warning_code_belongs_to_exactly_one_stage():
     assert EXTRACTION_CODES.isdisjoint(READ_CODES)
     # An unclassified code would be silently kept (or lost) across re-extraction.
     assert set(Code) == EXTRACTION_CODES | READ_CODES
-
-
-def test_only_real_warnings_mark_a_file(tmp_path: Path, config: Config):
-    from comfylens.analytics.snapshot import build_snapshot
-
-    root = tmp_path / "lib"
-    write(root, "golden.png", golden_png())  # UNUSED_LORA only: informational
-    write(root, "truncated.png", golden_png()[:-12])  # also TRUNCATED
-    run(root, config)
-    flags = dict(
-        build_snapshot(catalog_path(root)).images.select("rel_path", "has_warnings").iter_rows()
-    )
-    assert flags == {"golden.png": False, "truncated.png": True}

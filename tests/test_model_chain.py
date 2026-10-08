@@ -80,12 +80,11 @@ def test_model_sampling_shift(config):
     assert e.warnings == []
 
 
-def test_model_sampling_flux_is_generic_only(config):
+def test_model_sampling_flux_sets_no_shift(config):
     g = with_chain(("20", "ModelSamplingFlux", {"max_shift": 1.15, "base_shift": 0.5}))
     e = g.extract(config)
     assert e.shift is None
     assert e.warnings == []
-    assert ("max_shift", 1.15) in {(i.input_name, i.value) for i in e.generic_inputs}
 
 
 def test_unknown_patch_with_model_input_is_followed(config):

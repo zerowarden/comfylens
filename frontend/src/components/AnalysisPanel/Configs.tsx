@@ -1,5 +1,5 @@
 import type { ConfigRow, StatsResponse } from "../../api/types";
-import { fmtInt, fmtPct } from "../../lib/format";
+import { fmtInt, fmtPct, isSingleSelection } from "../../lib/format";
 import { ChainText } from "../icons";
 import { CopyButton } from "../ui";
 import FamilySections from "./FamilySections";
@@ -27,27 +27,32 @@ function ConfigLine({ fields }: { fields: Record<string, unknown> }) {
 }
 
 export default function Configs({ data }: { data: StatsResponse }) {
+  const single = isSingleSelection(data.scope);
   return (
-    <FamilySections groups={data.groups} count={(g) => g.images}>
+    <FamilySections groups={data.groups} count={single ? undefined : (g) => g.images}>
       {(group) => {
         const configs = group.configs ?? [];
         return (
           <>
-            <div className="mb-2 flex justify-end">
-              <CopyButton label="Copy all as text" text={() => configsText(configs)}>
-                All as text
-              </CopyButton>
-            </div>
+            {!single && (
+              <div className="mb-2 flex justify-end">
+                <CopyButton label="Copy all as text" text={() => configsText(configs)}>
+                  All as text
+                </CopyButton>
+              </div>
+            )}
             <ol className="space-y-2">
               {configs.map((c, i) => (
                 <li key={c.key} className="flex gap-2 text-xs">
                   <span className="w-5 shrink-0 text-right text-muted">{i + 1}</span>
                   <div className="min-w-0 flex-1">
                     <ConfigLine fields={c.fields} />
-                    <div className="text-muted tabular-nums">
-                      {fmtInt(c.count)} images ({fmtPct(c.share)})
-                    </div>
-                    <Thumbs ids={c.examples} hashes={c.example_hashes} />
+                    {!single && (
+                      <div className="text-muted tabular-nums">
+                        {fmtInt(c.count)} images ({fmtPct(c.share)})
+                      </div>
+                    )}
+                    {!single && <Thumbs ids={c.examples} hashes={c.example_hashes} />}
                   </div>
                 </li>
               ))}

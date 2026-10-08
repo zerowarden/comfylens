@@ -6,13 +6,17 @@ from typing import Any
 
 import polars as pl
 
-from comfylens.analytics.scope import NO_LOOKUP, Scope, resolve
-from comfylens.analytics.snapshot import Snapshot, snapshot_from_conn
-from comfylens.analytics.stats import compute_stats
+from comfylens.analytics import (
+    NO_LOOKUP,
+    Scope,
+    Snapshot,
+    compute_stats,
+    resolve,
+    snapshot_from_conn,
+)
 from comfylens.config import Config
-from comfylens.db.connection import is_stale
-from comfylens.extract.family import UNKNOWN
-from comfylens.extract.registry import unregistered
+from comfylens.db import is_stale
+from comfylens.extract import UNKNOWN, unregistered
 from comfylens.warn import INFORMATIONAL_CODES
 
 TOP_LORAS = 10
@@ -25,7 +29,7 @@ def build_report(
     conn: sqlite3.Connection, config: Config, *, family: str | None = None
 ) -> dict[str, Any]:
     meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
-    snap = snapshot_from_conn(conn, with_node_inputs=False)
+    snap = snapshot_from_conn(conn)
     gens = snap.images.filter("has_generation")
     return {
         "library": {

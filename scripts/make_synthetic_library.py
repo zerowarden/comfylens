@@ -204,54 +204,88 @@ def krea2_turbo(rng: random.Random, positive: str) -> dict[str, Any]:
 
 def api_prompt(rng: random.Random) -> dict[str, Any]:
     family = rng.choices([f for f, _ in FAMILIES], [w for _, w in FAMILIES])[0]
-    g: dict[str, Any] = {}
     positive, negative = prompt_text(rng), rng.choice(NEGATIVES)
-    if family == "krea2":
-        return krea2_turbo(rng, positive)
-    if family == "krea2-api":  # remote generation: the prompt is on the API node itself
-        g["1"] = node(
+    hosted = _HOSTED.get(family)
+    return hosted(rng, positive) if hosted else sampled(rng, family, positive, negative)
+
+
+def krea2_api(rng: random.Random, positive: str) -> dict[str, Any]:
+    """Remote generation: the prompt is on the API node itself."""
+    return {
+        "1": node(
             "Krea2ImageNode",
             prompt=positive,
             seed=rng.randrange(2**31),
             **{"model": rng.choice(["Krea 2 Medium", "Krea 2 Large"]), "model.aspect_ratio": "1:1"},
-        )
-        g["2"] = node("SaveImage", images=["1", 0], filename_prefix="Krea2")
-        return g
-    if family == "ideogram":  # hosted API node: no sampler, no LoRAs
-        g["1"] = node(
+        ),
+        "2": node("SaveImage", images=["1", 0], filename_prefix="Krea2"),
+    }
+
+
+def ideogram(rng: random.Random, positive: str) -> dict[str, Any]:
+    """A hosted API node: no sampler, no LoRAs."""
+    return {
+        "1": node(
             "IdeogramV4",
             prompt=positive,
             aspect_ratio=rng.choice(["1:1", "9:16", "16:9"]),
             seed=rng.randrange(2**32),
-        )
-        g["2"] = node("SaveImage", images=["1", 0], filename_prefix="ideogram")
-        return g
+        ),
+        "2": node("SaveImage", images=["1", 0], filename_prefix="ideogram"),
+    }
 
-    unet = {
-        "qwen21": "qwen/qwen_image_2.1_int8_convrot.safetensors",
-        "qwen": "qwen_image_fp8_e4m3fn.safetensors",
-        "flux": "flux1-dev-fp8.safetensors",
-        "krea": "flux1-krea-dev.safetensors",
-    }[family]
-    g["1"] = node("UNETLoader", unet_name=unet, weight_dtype="default")
-    clip_type = {"qwen21": "qwen_image", "qwen": "qwen_image"}.get(family, "flux")
-    if family in ("flux", "krea"):
-        g["2"] = node(
+
+_HOSTED = {"krea2": krea2_turbo, "krea2-api": krea2_api, "ideogram": ideogram}
+_UNETS = {
+    "qwen21": "qwen/qwen_image_2.1_int8_convrot.safetensors",
+    "qwen": "qwen_image_fp8_e4m3fn.safetensors",
+    "flux": "flux1-dev-fp8.safetensors",
+    "krea": "flux1-krea-dev.safetensors",
+}
+_FLUX_LIKE = ("flux", "krea")
+
+type Ref = list[Any]  # [node id, output slot]
+
+
+def sampled(rng: random.Random, family: str, positive: str, negative: str) -> dict[str, Any]:
+    """Loaders and LoRAs, conditioning, one or two sampling passes, decode and save."""
+    g: dict[str, Any] = {}
+    model = loaders(g, rng, family)
+    pos, neg, latent = conditioning(g, rng, family, positive, negative)
+    samples = sample(g, rng, family, model, pos, neg, latent)
+    g["7"] = node("VAEDecode", samples=samples, vae=["3", 0])
+    g["8"] = node("SaveImage", images=["7", 0], filename_prefix="ComfyUI")
+    return g
+
+
+def loaders(g: dict[str, Any], rng: random.Random, family: str) -> Ref:
+    """The model, CLIP and VAE loaders and the LoRA chain; returns the model to sample with."""
+    g["1"] = node("UNETLoader", unet_name=_UNETS[family], weight_dtype="default")
+    clip_type = "flux" if family in _FLUX_LIKE else "qwen_image"
+    g["2"] = (
+        node(
             "DualCLIPLoader",
             clip_name1="clip_l.safetensors",
             clip_name2="t5xxl_fp8.safetensors",
             type=clip_type,
         )
-    else:
-        g["2"] = node("CLIPLoader", clip_name="qwen3vl_8b.safetensors", type=clip_type)
+        if family in _FLUX_LIKE
+        else node("CLIPLoader", clip_name="qwen3vl_8b.safetensors", type=clip_type)
+    )
     g["3"] = node("VAELoader", vae_name=f"{family}_vae.safetensors")
     model = lora_chain(g, rng, family, ["1", 0], ["2", 0])
-    if family == "qwen":
-        g["5"] = node("ModelSamplingAuraFlow", shift=rng.choice([2.5, 3.1, 3.1]), model=model)
-        model = ["5", 0]
+    if family != "qwen":
+        return model
+    g["5"] = node("ModelSamplingAuraFlow", shift=rng.choice([2.5, 3.1, 3.1]), model=model)
+    return ["5", 0]
 
+
+def conditioning(
+    g: dict[str, Any], rng: random.Random, family: str, positive: str, negative: str
+) -> tuple[Ref, Ref, Ref]:
+    """Positive and negative conditioning and the latent to start from."""
     width, height = rng.choice([(1024, 1024), (896, 1632), (1632, 896), (832, 1216)])
-    if family == "qwen21":
+    if family == "qwen21":  # one node encodes both prompts and makes the latent
         g["9"] = node(
             "TextEncodeQwenImage21",
             prompt=positive,
@@ -259,22 +293,24 @@ def api_prompt(rng: random.Random) -> dict[str, Any]:
             resolution=rng.choice([1024, 1216]),
             clip=["2", 0],
         )
-        pos, neg, latent = ["9", 0], ["9", 1], ["9", 2]
-    else:
-        g["10"] = node("CLIPTextEncode", text=positive, clip=["2", 0])
-        g["11"] = node("CLIPTextEncode", text=negative, clip=["2", 0])
-        pos, neg = ["10", 0], ["11", 0]
-        if family in ("flux", "krea"):
-            g["12"] = node(
-                "FluxGuidance", guidance=rng.choice([2.5, 3.5, 3.5, 4.0]), conditioning=pos
-            )
-            pos = ["12", 0]
-        batch = rng.choice([1, 1, 2, 4])
-        g["13"] = node("EmptySD3LatentImage", width=width, height=height, batch_size=batch)
-        latent = ["13", 0]
+        return ["9", 0], ["9", 1], ["9", 2]
+    g["10"] = node("CLIPTextEncode", text=positive, clip=["2", 0])
+    g["11"] = node("CLIPTextEncode", text=negative, clip=["2", 0])
+    pos: Ref = ["10", 0]
+    if family in _FLUX_LIKE:
+        g["12"] = node("FluxGuidance", guidance=rng.choice([2.5, 3.5, 3.5, 4.0]), conditioning=pos)
+        pos = ["12", 0]
+    batch = rng.choice([1, 1, 2, 4])
+    g["13"] = node("EmptySD3LatentImage", width=width, height=height, batch_size=batch)
+    return pos, ["11", 0], ["13", 0]
 
+
+def sample(
+    g: dict[str, Any], rng: random.Random, family: str, model: Ref, pos: Ref, neg: Ref, latent: Ref
+) -> Ref:
+    """A KSampler, or now and then the custom-advanced nodes, plus sometimes a refining pass."""
     steps = rng.choice([8, 11, 20, 25, 25, 28, 30])
-    cfg = 1.0 if family in ("flux", "krea") else rng.choice([2.0, 2.5, 3.0, 4.0])
+    cfg = 1.0 if family in _FLUX_LIKE else rng.choice([2.0, 2.5, 3.0, 4.0])
     sampler, scheduler = rng.choice(SAMPLERS), rng.choice(SCHEDULERS)
     seed = rng.randrange(2**50)
     if rng.random() < 0.15:
@@ -291,57 +327,56 @@ def api_prompt(rng: random.Random) -> dict[str, Any]:
             latent_image=latent,
         )
     else:
+        denoise = rng.choice([1.0, 1.0, 0.97])
         g["6"] = node(
-            "KSampler",
-            seed=seed,
-            steps=steps,
-            cfg=cfg,
-            sampler_name=sampler,
-            scheduler=scheduler,
-            denoise=rng.choice([1.0, 1.0, 0.97]),
-            model=model,
-            positive=pos,
-            negative=neg,
-            latent_image=latent,
-        )
-    samples = ["6", 0]
-    if rng.random() < 0.1:  # second, refining pass
-        g["30"] = node(
-            "LatentUpscaleBy", upscale_method="nearest-exact", scale_by=1.5, samples=samples
-        )
-        g["31"] = node(
-            "KSampler",
-            seed=seed + 1,
-            steps=12,
-            cfg=cfg,
-            sampler_name=sampler,
-            scheduler=scheduler,
-            denoise=0.45,
-            model=model,
-            positive=pos,
-            negative=neg,
-            latent_image=["30", 0],
-        )
-        samples = ["31", 0]
-    g["7"] = node("VAEDecode", samples=samples, vae=["3", 0])
-    g["8"] = node("SaveImage", images=["7", 0], filename_prefix="ComfyUI")
-    return g
+            "KSampler", seed=seed, steps=steps, cfg=cfg, sampler_name=sampler, scheduler=scheduler,
+            denoise=denoise, model=model, positive=pos, negative=neg, latent_image=latent,
+        )  # fmt: skip
+    if rng.random() >= 0.1:
+        return ["6", 0]
+    # A second, refining pass.
+    g["30"] = node(
+        "LatentUpscaleBy", upscale_method="nearest-exact", scale_by=1.5, samples=["6", 0]
+    )
+    g["31"] = node(
+        "KSampler", seed=seed + 1, steps=12, cfg=cfg, sampler_name=sampler, scheduler=scheduler,
+        denoise=0.45, model=model, positive=pos, negative=neg, latent_image=["30", 0],
+    )  # fmt: skip
+    return ["31", 0]
 
 
 def workflow_for(prompt: dict[str, Any]) -> dict[str, Any]:
-    """A UI-workflow-shaped blob of realistic size; extraction never reads it."""
+    """A format 0.4 UI workflow with the prompt's top-level nodes and the links between them.
+    Subgraph node ids like "30:10" are not numbers: ComfyUI keeps those nodes in a subgraph."""
+    top = {node_id: n for node_id, n in prompt.items() if node_id.isdigit()}
+    links = [
+        [number, int(value[0]), value[1], int(node_id), 0, "*"]
+        for number, (node_id, value) in enumerate(
+            (
+                (node_id, value)
+                for node_id, n in top.items()
+                for value in n["inputs"].values()
+                if isinstance(value, list) and str(value[0]) in top
+            ),
+            start=1,
+        )
+    ]
     nodes = [
         {
-            "id": index,  # subgraph node ids like "30:10" are not numbers
+            "id": int(node_id),
             "type": n["class_type"],
             "mode": 0,
             "pos": [index * 40, 100],
             "size": [315, 130],
+            "inputs": [
+                {"name": "in", "link": link[0]} for link in links if link[3] == int(node_id)
+            ],
+            "outputs": [{"name": "out", "links": [k[0] for k in links if k[1] == int(node_id)]}],
             "widgets_values": [v for v in n["inputs"].values() if not isinstance(v, list)],
         }
-        for index, n in enumerate(prompt.values(), start=1)
+        for index, (node_id, n) in enumerate(top.items(), start=1)
     ]
-    return {"nodes": nodes, "links": [], "groups": [], "version": 0.4}
+    return {"nodes": nodes, "links": links, "groups": [], "version": 0.4}
 
 
 def write_batch(args: tuple[int, int, int, str, float]) -> int:

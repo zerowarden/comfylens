@@ -2,11 +2,15 @@
 
 import struct
 import zlib
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 
-from comfylens.metadata.types import MAX_TEXT_BYTES, Scan, TextHit
+from comfylens.metadata.types import MAX_TEXT_BYTES, Scan, TextHit, Truncated, until_truncated
+from comfylens.metadata.xmp import read_tags
 from comfylens.warn import Code, Warn
 
 SIGNATURE = b"\x89PNG\r\n\x1a\n"
+XMP_KEYWORD = "XML:com.adobe.xmp"  # the iTXt keyword the XMP specification gives PNG
 _CHUNK_HEADER = struct.Struct(">I4s")
 _IHDR = struct.Struct(">II")
 
@@ -15,57 +19,87 @@ class NotPNG(ValueError):
     """The data does not start with the PNG signature."""
 
 
+@dataclass(frozen=True, slots=True)
+class Chunk:
+    type: bytes
+    start: int  # of the length field
+    stop: int  # after the CRC
+    data: memoryview
+
+
+def png_chunks(view: memoryview) -> Iterator[Chunk]:
+    """Every chunk after the signature, through IEND; CRCs are not verified. Raises Truncated."""
+    pos = len(SIGNATURE)
+    while True:
+        if pos + 12 > len(view):
+            raise Truncated("the PNG ends before its IEND chunk")
+        length, ctype = _CHUNK_HEADER.unpack_from(view, pos)
+        stop = pos + 12 + length  # length and type, data, CRC
+        if stop > len(view):
+            raise Truncated("the PNG ends inside a chunk")
+        yield Chunk(ctype, pos, stop, view[pos + 8 : stop - 4])
+        if ctype == b"IEND":
+            return
+        pos = stop
+
+
+def chunk_bytes(ctype: bytes, body: bytes) -> bytes:
+    """A whole PNG chunk: length, type, body and CRC."""
+    return _CHUNK_HEADER.pack(len(body), ctype) + body + zlib.crc32(ctype + body).to_bytes(4)
+
+
 def read_png(data: bytes | memoryview) -> Scan:
     view = memoryview(data)
     if bytes(view[:8]) != SIGNATURE:
         raise NotPNG("missing PNG signature")
-
-    size: tuple[int, int] | None = None
-    hits: list[TextHit] = []
-    pos, end, complete = 8, len(view), False
-    while pos + 8 <= end:
-        length, ctype = _CHUNK_HEADER.unpack_from(view, pos)
-        start, stop = pos + 8, pos + 8 + length
-        if stop > end:
-            break
-        if ctype == b"IHDR" and length >= 8:
-            size = _IHDR.unpack_from(view, start)
-        elif ctype in (b"tEXt", b"zTXt", b"iTXt"):
-            hit = _text_chunk(ctype.decode("ascii"), bytes(view[start:stop]))
-            if hit is not None:
-                hits.append(hit)
-        elif ctype == b"IEND":
-            complete = True
-            break
-        # IDAT and every other chunk are skipped: text chunks may follow image data.
-        pos = stop + 4  # CRCs are not verified
-
-    if size is None:
+    # Text chunks may follow the image data, so every chunk is read.
+    chunks, truncated = until_truncated(png_chunks(view))
+    ihdr = next((c.data for c in chunks if c.type == b"IHDR" and len(c.data) >= 8), None)
+    if ihdr is None:
         raise ValueError("PNG has no IHDR chunk")
-    warnings = [] if complete else [Warn(Code.TRUNCATED, None, "PNG ends before IEND")]
-    return Scan("png", size[0], size[1], hits, warnings)
+    texts = [
+        hit
+        for c in chunks
+        if c.type in _TEXT_PAYLOADS and (hit := text_chunk(c.type, bytes(c.data)))
+    ]
+    own = [(hit, _own_tags(hit)) for hit in texts]
+    warnings = [Warn(Code.TRUNCATED, None, "PNG ends before IEND")] if truncated else []
+    return Scan(
+        "png",
+        *_IHDR.unpack_from(ihdr),
+        hits=[hit for hit, tags in own if tags is None],
+        warnings=warnings,
+        tags=next((tags for _, tags in reversed(own) if tags is not None), []),
+    )
 
 
-def _text_chunk(ctype: str, data: bytes) -> TextHit | None:
-    keyword, sep, rest = data.partition(b"\0")
-    if not sep:
+def _own_tags(hit: TextHit) -> list[str] | None:
+    return read_tags(hit.text) if hit.key == XMP_KEYWORD else None
+
+
+def _itxt_payload(rest: bytes) -> bytes | None:
+    """Compression flag and method, language and translated keyword, then the text."""
+    if len(rest) < 2:
         return None
-    if ctype == "zTXt":
-        # One compression-method byte, then zlib data.
-        payload = _inflate(rest[1:])
-    elif ctype == "iTXt":
-        if len(rest) < 2:
-            return None
-        compressed = rest[0] == 1
-        _language, _, rest = rest[2:].partition(b"\0")
-        _translated, _, payload = rest.partition(b"\0")
-        if compressed:
-            payload = _inflate(payload)
-    else:
-        payload = rest
+    parts = rest[2:].split(b"\0", 2)
+    payload = parts[2] if len(parts) == 3 else b""
+    return _inflate(payload) if rest[0] == 1 else payload
+
+
+# What follows a text chunk's keyword, by chunk type, to its text bytes.
+_TEXT_PAYLOADS: dict[bytes, Callable[[bytes], bytes | None]] = {
+    b"tEXt": lambda rest: rest,
+    b"zTXt": lambda rest: _inflate(rest[1:]),  # one compression-method byte, then zlib data
+    b"iTXt": _itxt_payload,
+}
+
+
+def text_chunk(ctype: bytes, data: bytes) -> TextHit | None:
+    keyword, sep, rest = data.partition(b"\0")
+    payload = _TEXT_PAYLOADS[ctype](rest) if sep else None
     if payload is None:
         return None
-    return TextHit(keyword.decode("latin-1"), decode_text(payload), f"png:{ctype}")
+    return TextHit(keyword.decode("latin-1"), decode_text(payload), f"png:{ctype.decode()}")
 
 
 def _inflate(data: bytes) -> bytes | None:

@@ -5,7 +5,7 @@ export interface Selection {
   anchor: number | null;
 }
 
-export interface Modifiers {
+interface Modifiers {
   ctrl: boolean; // Ctrl or Cmd
   shift: boolean;
 }
@@ -69,9 +69,7 @@ export function withoutIds(current: Selection, gone: ReadonlySet<number>): Selec
 
 /** Selected ids that the current filters hide. */
 export function hiddenCount(selected: ReadonlySet<number>, visible: ReadonlySet<number>): number {
-  let hidden = 0;
-  for (const id of selected) if (!visible.has(id)) hidden++;
-  return hidden;
+  return [...selected].filter((id) => !visible.has(id)).length;
 }
 
 interface SelectionStore extends Selection {

@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from collections.abc import Iterator
 from importlib import resources
 from pathlib import Path
 
@@ -81,23 +82,33 @@ def units(
     Phrases are whole segments after trimming leading and trailing stopwords. N-grams stay
     within a segment and never start or end with a stopword. Neither is ever pure numbers.
     """
-    found: set[tuple[str, str]] = set()
-    for segment in segments(sentence):
-        words = tokens(segment)
-        start, end = 0, len(words)
-        while start < end and words[start] in stopwords:
-            start += 1
-        while end > start and words[end - 1] in stopwords:
-            end -= 1
-        phrase = words[start:end]
-        if 1 <= len(phrase) <= max_phrase_words and not all(_NUMBER.fullmatch(w) for w in phrase):
-            found.add(("phrase", " ".join(phrase)))
-        for n in range(1, max_ngram + 1):
-            for i in range(len(words) - n + 1):
-                gram = words[i : i + n]
-                if gram[0] in stopwords or gram[-1] in stopwords:
-                    continue
-                if all(_NUMBER.fullmatch(w) for w in gram):
-                    continue
-                found.add((f"{n}g", " ".join(gram)))
-    return found
+    return {
+        unit
+        for segment in segments(sentence)
+        for unit in _segment_units(tokens(segment), stopwords, max_phrase_words, max_ngram)
+    }
+
+
+def _segment_units(
+    words: list[str], stopwords: frozenset[str], max_phrase_words: int, max_ngram: int
+) -> Iterator[tuple[str, str]]:
+    phrase = _trimmed(words, stopwords)
+    if 1 <= len(phrase) <= max_phrase_words and not _numbers(phrase):
+        yield "phrase", " ".join(phrase)
+    grams = (words[i : i + n] for n in range(1, max_ngram + 1) for i in range(len(words) - n + 1))
+    yield from (
+        (f"{len(gram)}g", " ".join(gram))
+        for gram in grams
+        if gram[0] not in stopwords and gram[-1] not in stopwords and not _numbers(gram)
+    )
+
+
+def _trimmed(words: list[str], stopwords: frozenset[str]) -> list[str]:
+    """`words` without their leading and trailing stopwords."""
+    start = next((i for i, w in enumerate(words) if w not in stopwords), len(words))
+    end = next((i for i in range(len(words), start, -1) if words[i - 1] not in stopwords), start)
+    return words[start:end]
+
+
+def _numbers(words: list[str]) -> bool:
+    return all(_NUMBER.fullmatch(w) for w in words)

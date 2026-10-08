@@ -1,5 +1,5 @@
 """Grid pages, id lists, detail, raw metadata, originals and their metadata-free copies,
-thumbnails, renames and trashing."""
+thumbnails, renames, tagging and trashing."""
 
 import json
 import os
@@ -12,8 +12,7 @@ import polars as pl
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, Response
 
-from comfylens.analytics.collection import has_hash
-from comfylens.analytics.scope import filter_files
+from comfylens.analytics import filter_files, has_hash
 from comfylens.api.errors import ApiError, not_found, parse_id
 from comfylens.api.schemas import (
     IdsQuery,
@@ -25,6 +24,8 @@ from comfylens.api.schemas import (
     RenameRequest,
     RenameResponse,
     Sort,
+    TagRequest,
+    TagResponse,
     TrashRequest,
     TrashResponse,
 )
@@ -36,13 +37,11 @@ from comfylens.api.server import (
     server_of,
     stored_json,
 )
-from comfylens.collection.drafts import rebuild_thumbnail
-from comfylens.collection.models import HASH_RE
-from comfylens.db.connection import rows
-from comfylens.extract.normalize import size_facts
-from comfylens.index import file_ops
-from comfylens.index.write import LORA_COLUMNS, SAMPLER_STAGE_COLUMNS
-from comfylens.metadata.strip import CannotStrip, strip_metadata
+from comfylens.collection import HASH_RE, rebuild_thumbnail
+from comfylens.db import rows
+from comfylens.extract import size_facts
+from comfylens.index import LORA_COLUMNS, SAMPLER_STAGE_COLUMNS, file_ops
+from comfylens.metadata import CannotStrip, strip_metadata
 from comfylens.paths import thumb_path, thumbs_dir
 
 router = APIRouter(prefix="/api/images")
@@ -61,12 +60,11 @@ _ITEM_COLUMNS = [
     "rel_path",
     "width",
     "height",
-    pl.col("model_family").alias("family"),
     "generated_at",
     "status",
-    "has_warnings",
     "timestamp_suspect",
     "saved",
+    "tags",
 ]
 _THUMB_NAME = re.compile(HASH_RE + r"\.webp")
 # The detail payload uses the dataclass field name `index`, the table column `stage_index`.
@@ -111,6 +109,10 @@ def _file_row(conn: sqlite3.Connection, raw_id: str) -> dict[str, Any]:
 _BUSY = "the catalog is busy with an index run; try again"
 
 
+def _failures(failed: list[tuple[int, str]]) -> list[dict[str, Any]]:
+    return [{"id": i, "message": m} for i, m in failed]
+
+
 @router.post("/trash", response_model=TrashResponse, dependencies=[Depends(same_origin)])
 def trash(body: TrashRequest, request: Request) -> dict[str, Any]:
     """Move files to the system trash. Each file succeeds or fails on its own."""
@@ -118,10 +120,18 @@ def trash(body: TrashRequest, request: Request) -> dict[str, Any]:
         result = server_of(request).trash(body.ids)
     except sqlite3.OperationalError as e:
         raise ApiError(503, "catalog_busy", _BUSY) from e
-    return {
-        "trashed": result.removed,
-        "failed": [{"id": i, "message": m} for i, m in result.failed],
-    }
+    return {"trashed": result.removed, "failed": _failures(result.failed)}
+
+
+@router.post("/tags", response_model=TagResponse, dependencies=[Depends(same_origin)])
+def tag(body: TagRequest, request: Request) -> dict[str, Any]:
+    """Remove, then add tags, written into the files. Each file succeeds or fails on its own."""
+    try:
+        result = server_of(request).tag(body.ids, body.add, body.remove)
+    except sqlite3.OperationalError as e:
+        raise ApiError(503, "catalog_busy", _BUSY) from e
+    tagged = [{"id": i, "tags": t} for i, t in result.tags.items()]
+    return {"tagged": tagged, "failed": _failures(result.failed)}
 
 
 @router.get("/{raw_id}", response_model=ImageDetail)
@@ -150,6 +160,12 @@ def detail(raw_id: str, request: Request) -> dict[str, Any]:
         warnings = rows(
             conn, "SELECT code, node_id, message FROM warnings WHERE file_id = ?", (file_id,)
         )
+        tags = [
+            t
+            for (t,) in conn.execute(
+                "SELECT tag FROM tags WHERE file_id = ? ORDER BY tag", (file_id,)
+            )
+        ]
         reachable = dict(
             conn.execute(
                 "SELECT node_id, reachable FROM nodes WHERE file_id = ?", (file_id,)
@@ -194,6 +210,7 @@ def detail(raw_id: str, request: Request) -> dict[str, Any]:
             "timestamp_suspect": bool(f["timestamp_suspect"]),
             "status": f["status"],
             "error": f["error"],
+            "tags": tags,
         },
         "generation": gen,
         "stages": stages,

@@ -1,7 +1,15 @@
-import { useState, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type TransitionEvent,
+} from "react";
 
 import { thumbUrl } from "../api/client";
 import { familyColor } from "../lib/colors";
+import { fractionOf } from "../lib/format";
 import { copyText } from "../lib/hooks";
 import { useThumbnailFailure } from "../lib/images";
 import { Glyph } from "./icons";
@@ -44,6 +52,7 @@ export function Button({
   );
 }
 
+/** Options in a row; the chosen one's highlight slides to the next pick. */
 export function Segmented<T extends string>({
   value,
   options,
@@ -53,20 +62,69 @@ export function Segmented<T extends string>({
   options: { value: T; label: string }[];
   onChange: (value: T) => void;
 }) {
+  const buttons = useRef(new Map<T, HTMLButtonElement>());
+  const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
+  const labels = options.map((o) => o.label).join("\0");
+  // Measured before paint, and drawn only once measured: the highlight appears in place on the
+  // first frame instead of growing from nothing, and slides only on a new pick.
+  useLayoutEffect(() => {
+    const b = buttons.current.get(value);
+    const next = b && { left: b.offsetLeft, width: b.offsetWidth };
+    setPill((p) => (p?.left === next?.left && p?.width === next?.width ? p : (next ?? null)));
+  }, [value, labels]);
   return (
-    <div className="inline-flex overflow-hidden rounded border border-control">
+    <div className="relative inline-flex overflow-hidden rounded border border-control">
+      {pill && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 bg-accent/20 transition-[translate,width] duration-(--dur) ease-snappy"
+          style={{ translate: `${pill.left}px`, width: pill.width }}
+        />
+      )}
       {options.map((o) => (
         <button
           key={o.value}
+          ref={(b) => {
+            if (b) buttons.current.set(o.value, b);
+            else buttons.current.delete(o.value);
+          }}
           type="button"
+          aria-pressed={o.value === value}
           onClick={() => onChange(o.value)}
-          className={`px-2 py-0.5 text-xs ${
-            o.value === value ? "bg-accent/20 text-accent-text" : "hover:bg-hover"
+          className={`relative px-2 py-0.5 text-xs transition-colors duration-(--dur-fast) ${
+            o.value === value ? "text-accent-text" : "hover:bg-hover"
           }`}
         >
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Content that slides open and shut instead of appearing and vanishing at once, so what sits
+ * below moves smoothly. Closed, it leaves the DOM once the slide is over.
+ */
+export function Reveal({ open, children }: { open: boolean; children: ReactNode }) {
+  const target = open ? "open" : "closed";
+  const [phase, setPhase] = useState<"open" | "closed" | "moving">(target);
+  if (phase !== target && phase !== "moving") setPhase("moving");
+  const settle = (e: TransitionEvent) => {
+    if (e.target === e.currentTarget) setPhase(target);
+  };
+  return (
+    <div
+      inert={!open}
+      onTransitionEnd={settle}
+      className={`grid transition-[grid-template-rows,opacity] duration-(--dur) ease-snappy ${
+        open ? "grid-rows-[1fr]" : "grid-rows-[0fr] opacity-0"
+      }`}
+    >
+      {/* Clipped only while it moves or is shut: open, popups and focus rings may overflow. */}
+      <div className={`min-h-0 ${phase === "open" ? "" : "overflow-hidden"}`}>
+        {phase !== "closed" && children}
+      </div>
     </div>
   );
 }
@@ -88,12 +146,8 @@ export function Collapsible({
   right?: ReactNode;
 }) {
   const [own, setOwn] = useState(defaultOpen);
-  // Ease open only on the user's click: a section that mounts open (new scope, new family) must
-  // not replay the animation.
-  const [clicked, setClicked] = useState(false);
   const open = controlled ?? own;
   const setOpen = (next: boolean) => {
-    setClicked(true);
     if (onToggle) onToggle(next);
     else setOwn(next);
   };
@@ -102,20 +156,21 @@ export function Collapsible({
       <div className="flex items-center gap-2 px-3 py-2">
         <button
           type="button"
+          aria-expanded={open}
           onClick={() => setOpen(!open)}
           className="flex flex-1 items-center gap-2 text-left font-medium"
         >
           <Glyph
             name="chevronRight"
-            className={`size-3.5 text-muted transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+            className={`size-3.5 text-muted transition-transform duration-(--dur) ease-snappy ${open ? "rotate-90" : ""}`}
           />
           {title}
         </button>
         {right}
       </div>
-      {open && (
-        <div className={`px-3 pb-3 ${clicked ? "motion-safe:animate-expand" : ""}`}>{children}</div>
-      )}
+      <Reveal open={open}>
+        <div className="px-3 pb-3">{children}</div>
+      </Reveal>
     </section>
   );
 }
@@ -132,7 +187,9 @@ export function ShareBar({
   return (
     <div className={`h-1.5 ${className} rounded bg-track`}>
       <div
-        className={`h-1.5 rounded ${tone === "warning" ? "bg-warning" : "bg-accent"}`}
+        className={`h-1.5 rounded transition-[width] duration-(--dur) ease-snappy ${
+          tone === "warning" ? "bg-warning" : "bg-accent"
+        }`}
         style={{ width: `${Math.min(100, share * 100)}%` }}
       />
     </div>
@@ -220,10 +277,58 @@ export function CloseButton({ onClick }: { onClick: () => void }) {
       title="Close (Esc)"
       aria-label="Close"
       onClick={onClick}
-      className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+      className="rounded p-1 text-muted transition-colors duration-(--dur-fast) hover:bg-hover hover:text-fg"
     >
       <Glyph name="x" className="size-4" />
     </button>
+  );
+}
+
+/** A small ×: clears a filter or removes an item from a list. */
+export function ClearButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className="shrink-0 rounded text-muted transition-colors duration-(--dur-fast) hover:text-danger"
+    >
+      <Glyph name="x" className="size-3" />
+    </button>
+  );
+}
+
+/** A single-value slider; the track fills with the accent up to the thumb (see index.css). */
+export function Slider({
+  value,
+  min,
+  max,
+  step,
+  label,
+  onChange,
+  className = "",
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  label: string;
+  onChange: (value: number) => void;
+  className?: string;
+}) {
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      aria-label={label}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className={className}
+      style={{ "--fill": `${fractionOf(value, min, max) * 100}%` } as CSSProperties}
+    />
   );
 }
 
@@ -254,17 +359,15 @@ export function FilterLink({
 export function FamilyDot({
   family,
   large = false,
-  className = "",
   title,
 }: {
   family: string | null | undefined;
   large?: boolean;
-  className?: string;
   title?: string;
 }) {
   return (
     <span
-      className={`inline-block shrink-0 rounded-full ${large ? "size-2.5" : "size-2"} ${className}`}
+      className={`inline-block shrink-0 rounded-full ${large ? "size-2.5" : "size-2"}`}
       style={{ background: familyColor(family) }}
       title={title}
     />
@@ -284,6 +387,8 @@ export function Thumbnail({
   fit?: "contain" | "cover";
 }) {
   const [failed, onError] = useThumbnailFailure();
+  // Fades in once decoded rather than painting in strips; keyed by hash for reused elements.
+  const [loaded, setLoaded] = useState<string | null>(null);
   if (!hash || failed) return fallback;
   return (
     <img
@@ -292,8 +397,11 @@ export function Thumbnail({
       decoding="async"
       draggable={draggable}
       onError={onError}
+      onLoad={() => setLoaded(hash)}
       alt=""
-      className={`h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"}`}
+      className={`h-full w-full transition-opacity duration-(--dur) ease-snappy ${
+        loaded === hash ? "" : "opacity-0"
+      } ${fit === "cover" ? "object-cover" : "object-contain"}`}
     />
   );
 }
@@ -333,12 +441,23 @@ export function Message({ children }: { children: ReactNode }) {
   return <div className="px-3 py-6 text-center text-muted">{children}</div>;
 }
 
+/** The uppercase caption of a sidebar section, with an optional control on the right. */
+export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
+  return (
+    <div className="mb-1 flex min-h-5 items-center justify-between gap-2">
+      <span className="text-xs font-semibold tracking-wide text-muted uppercase">{children}</span>
+      {right}
+    </div>
+  );
+}
+
 /** The small caption above a block of panel or detail content. */
 export function Heading({ children }: { children: ReactNode }) {
   return <div className="mb-0.5 text-xs font-semibold text-muted">{children}</div>;
 }
 
-const BUTTON = "rounded border px-2 py-0.5 text-xs transition-colors";
+const BUTTON =
+  "rounded border px-2 py-0.5 text-xs transition-colors duration-(--dur-fast) active:translate-y-px";
 /** A link styled as an outlined `Button`. */
 export const LINK_BUTTON = `${BUTTON} border-control hover:bg-hover`;
 const FILLED = `${BUTTON} font-medium text-on-primary disabled:opacity-40`;
@@ -346,9 +465,8 @@ const FILLED = `${BUTTON} font-medium text-on-primary disabled:opacity-40`;
 export const PRIMARY = `${FILLED} border-primary bg-primary hover:bg-primary-hover`;
 /** A filled delete button. */
 export const DESTRUCTIVE = `${FILLED} border-destructive bg-destructive hover:bg-destructive-hover`;
-/** Text inputs and selects; add size and spacing. */
-export const FIELD = "rounded border border-control bg-transparent";
-/** A form field that highlights its border while focused. */
-export const FOCUS_FIELD = `${FIELD} text-fg outline-none focus:border-accent`;
+/** Text inputs and selects, which mark focus with their border; add size and spacing. */
+export const FIELD =
+  "rounded border border-control bg-transparent text-fg outline-none transition-colors duration-(--dur-fast) focus:border-accent";
 export const th = "px-1.5 py-1 text-left font-medium text-muted";
 export const td = "px-1.5 py-1 align-top";

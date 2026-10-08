@@ -21,6 +21,13 @@ CREATE TABLE files (
 CREATE INDEX files_hash ON files(content_hash);
 CREATE INDEX files_generated ON files(generated_at);
 
+-- Read from the file's comfylens XMP packet; the file is the source of truth.
+CREATE TABLE tags (
+  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (file_id, tag)
+);
+
 CREATE TABLE raw_metadata (
   file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
   sources TEXT,                           -- JSON object: key -> source
@@ -82,7 +89,7 @@ CREATE TABLE input_images (
   PRIMARY KEY (file_id, node_id)
 );
 
--- Every node of the API prompt; node_inputs alone misses nodes with only linked inputs.
+-- Every node of the API prompt.
 CREATE TABLE nodes (
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
   node_id TEXT NOT NULL, class_type TEXT NOT NULL,
@@ -90,18 +97,6 @@ CREATE TABLE nodes (
   PRIMARY KEY (file_id, node_id)
 );
 CREATE INDEX nodes_class ON nodes(class_type);
-
-CREATE TABLE node_inputs (
-  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-  node_id TEXT NOT NULL, class_type TEXT NOT NULL,
-  input_name TEXT NOT NULL,
-  kind TEXT NOT NULL,                     -- num | str | bool | json
-  value_num REAL,                         -- num, and bool as 0/1
-  value_text TEXT,                        -- str and json
-  reachable INTEGER NOT NULL
-);
-CREATE INDEX ni_key ON node_inputs(class_type, input_name);
-CREATE INDEX ni_file ON node_inputs(file_id);
 
 CREATE TABLE warnings (
   file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,

@@ -14,7 +14,8 @@ export default function FamilySections<T extends { family: string }>({
   children,
 }: {
   groups: T[];
-  count: (group: T) => number;
+  /** The count beside the family name; none draws no count, e.g. for a single selected image. */
+  count?: (group: T) => number;
   children: (group: T) => ReactNode;
 }) {
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
@@ -30,7 +31,9 @@ export default function FamilySections<T extends { family: string }>({
             <span className="flex items-center gap-2">
               <FamilyDot family={group.family} large />
               <ChainText text={group.family} kind="pipeline" />
-              <span className="font-normal text-muted tabular-nums">{fmtInt(count(group))}</span>
+              {count && (
+                <span className="font-normal text-muted tabular-nums"> {fmtInt(count(group))}</span>
+              )}
             </span>
           }
         >

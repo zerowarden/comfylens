@@ -14,10 +14,10 @@ import pytest
 from conftest import GOLDEN, load_golden, png_with_text
 
 from comfylens.analytics.text import sentences
-from comfylens.cli import to_dict
 from comfylens.config import Config
 from comfylens.extract.pipeline import Analysis, analyze
 from comfylens.index.worker import Job, ParsedFile, Settings, process_file
+from comfylens.inspect_data import to_dict
 from comfylens.paths import thumb_path, thumbs_dir
 from comfylens.warn import Code
 
@@ -101,11 +101,6 @@ def test_key_values_through_the_index_worker(worked: ParsedFile):
     )
     assert e.latent_source == "TextEncodeQwenImage21"
     assert (e.guidance, e.shift) == (None, None)
-    assert any(
-        (i.class_type, i.input_name, i.value, i.reachable)
-        == ("TextEncodeQwenImage21", "resolution", 1216, True)
-        for i in e.generic_inputs
-    )
     assert len(sentences(e.positive_prompt)) == 2  # despite the line wrapping
 
 

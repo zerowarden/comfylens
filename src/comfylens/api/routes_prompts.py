@@ -6,9 +6,7 @@ import polars as pl
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from comfylens.analytics.distinctive import distinctive_terms
-from comfylens.analytics.prompts import analyze_prompts
-from comfylens.analytics.scope import resolve
+from comfylens.analytics import analyze_prompts, distinctive_terms, resolve
 from comfylens.api.errors import ApiError, error_response
 from comfylens.api.schemas import (
     DistinctiveRequest,

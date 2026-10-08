@@ -5,7 +5,7 @@ from typing import Any
 
 from comfylens.extract.constants import source_literal
 from comfylens.extract.registry import Entry, Role
-from comfylens.graph.model import Graph, Link, Node
+from comfylens.graph import Graph, Link, Node
 
 
 def as_int(value: Any) -> int | None:

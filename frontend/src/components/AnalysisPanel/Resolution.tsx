@@ -1,44 +1,54 @@
-import type { StatsResponse } from "../../api/types";
-import { fmtInt } from "../../lib/format";
+import type { SeedStats, StatsResponse } from "../../api/types";
+import { isSingleSelection } from "../../lib/format";
 import { Heading, td } from "../ui";
-import CategoricalTable from "./Categorical";
+import { CategoricalField } from "./Categorical";
 import FamilySections from "./FamilySections";
-import { NumericTable } from "./Numeric";
+import { NumericField } from "./Numeric";
+
+/** The seeds shared by more than one image; nothing at all when no seed repeats. */
+function Seeds({ seeds }: { seeds: SeedStats }) {
+  if (seeds.repeated.length === 0) return null;
+  return (
+    <div className="mt-3 text-xs">
+      <Heading>Seeds</Heading>
+      <table className="mt-1 w-full">
+        <tbody>
+          {seeds.repeated.map((s) => (
+            <tr key={s.seed}>
+              <td className={`${td} font-mono`}>{s.seed}</td>
+              <td className={`${td} text-right tabular-nums`}>×{s.count}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function Resolution({ data }: { data: StatsResponse }) {
+  const single = isSingleSelection(data.scope);
   return (
-    <FamilySections groups={data.groups} count={(g) => g.images}>
+    <FamilySections groups={data.groups} count={single ? undefined : (g) => g.images}>
       {(group) => (
         <>
           {group.categorical?.resolution && (
-            <CategoricalTable title="Resolution" data={group.categorical.resolution} />
+            <CategoricalField
+              title="Resolution"
+              data={group.categorical.resolution}
+              single={single}
+            />
           )}
           {group.categorical?.aspect_label && (
-            <CategoricalTable title="Aspect" data={group.categorical.aspect_label} />
+            <CategoricalField
+              title="Aspect"
+              data={group.categorical.aspect_label}
+              single={single}
+            />
           )}
           {group.numeric?.megapixels && (
-            <NumericTable stats={{ megapixels: group.numeric.megapixels }} />
+            <NumericField name="megapixels" stats={group.numeric.megapixels} single={single} />
           )}
-          {group.seeds && (
-            <div className="mt-3 text-xs">
-              <Heading>Seeds</Heading>
-              <div>
-                {fmtInt(group.seeds.n_unique)} unique of {fmtInt(group.seeds.n)} images with a seed
-              </div>
-              {group.seeds.repeated.length > 0 && (
-                <table className="mt-1 w-full">
-                  <tbody>
-                    {group.seeds.repeated.map((s) => (
-                      <tr key={s.seed}>
-                        <td className={`${td} font-mono`}>{s.seed}</td>
-                        <td className={`${td} text-right tabular-nums`}>×{s.count}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
+          {group.seeds && <Seeds seeds={group.seeds} />}
         </>
       )}
     </FamilySections>

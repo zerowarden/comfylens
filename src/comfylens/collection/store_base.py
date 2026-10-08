@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from comfylens.collection.models import HASH_RE, MAX_TAG
-from comfylens.db.connection import connect, transaction
+from comfylens.db import connect, transaction
 
 HASH = re.compile(HASH_RE)
 # Originals no prompt refers to are kept this long: an open editor's draft must not lose its image.

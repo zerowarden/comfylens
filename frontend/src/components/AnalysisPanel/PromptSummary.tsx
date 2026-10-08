@@ -1,16 +1,31 @@
 import { useState } from "react";
 
-import type { DistinctPrompt, PromptGroup } from "../../api/types";
-import { fmtInt, fmtPct } from "../../lib/format";
+import type { PromptGroup } from "../../api/types";
 import { CopyButton, Heading } from "../ui";
 
-const SHOWN = 3;
+/** Positive prompts are tinted green, negative ones red. */
+const TINTS = {
+  positive: "border-success/30 bg-success/10",
+  negative: "border-danger/30 bg-danger/10",
+};
 
-function Entry({ prompt, counted }: { prompt: DistinctPrompt; counted: boolean }) {
+/** The most common non-empty prompt of one side, clamped until clicked. */
+function Side({
+  title,
+  group,
+  tint,
+}: {
+  title: string;
+  group: PromptGroup | undefined;
+  tint: keyof typeof TINTS;
+}) {
   const [full, setFull] = useState(false);
+  const prompt = group?.distinct.find((p) => p.text.trim() !== "");
+  if (!prompt) return null;
   return (
-    <li className="rounded border border-line p-1.5">
-      <div className="flex items-start gap-2">
+    <div className="mb-3 text-xs">
+      <div className="mb-0.5 font-semibold text-muted">{title}</div>
+      <div className={`flex items-start gap-2 rounded border p-1.5 ${TINTS[tint]}`}>
         <button
           type="button"
           title={full ? "Show less" : "Show the whole prompt"}
@@ -21,39 +36,11 @@ function Entry({ prompt, counted }: { prompt: DistinctPrompt; counted: boolean }
         </button>
         <CopyButton label="Copy prompt" text={prompt.text} />
       </div>
-      {counted && (
-        <div className="mt-0.5 text-muted tabular-nums">
-          {fmtInt(prompt.count)} images ({fmtPct(prompt.share)})
-        </div>
-      )}
-    </li>
-  );
-}
-
-function Side({ title, group }: { title: string; group: PromptGroup | undefined }) {
-  const prompts = group?.distinct.filter((p) => p.text.trim() !== "") ?? [];
-  if (prompts.length === 0) return null;
-  const several = group !== undefined && group.distinct_total > 1;
-  return (
-    <div className="mb-3 text-xs">
-      <div className="mb-0.5 flex items-baseline gap-2">
-        <span className="font-semibold text-muted">{title}</span>
-        {several && (
-          <span className="text-muted">
-            {fmtInt(Math.min(SHOWN, prompts.length))} of {fmtInt(group.distinct_total)} distinct
-          </span>
-        )}
-      </div>
-      <ul className="space-y-1">
-        {prompts.slice(0, SHOWN).map((p) => (
-          <Entry key={p.key} prompt={p} counted={several} />
-        ))}
-      </ul>
     </div>
   );
 }
 
-/** The prompts themselves, most common first, each with a copy button. */
+/** The most common prompts, each with a copy button; the Prompts tab lists the rest. */
 export default function PromptSummary({
   positive,
   negative,
@@ -73,8 +60,8 @@ export default function PromptSummary({
     );
   return (
     <>
-      <Side title="Prompt" group={positive} />
-      <Side title="Negative prompt" group={negative} />
+      <Side title="Prompt" group={positive} tint="positive" />
+      <Side title="Negative prompt" group={negative} tint="negative" />
     </>
   );
 }

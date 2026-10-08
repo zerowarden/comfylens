@@ -3,8 +3,7 @@ import type { ReactNode } from "react";
 
 import { api } from "../../api/client";
 import type { PromptRef } from "../../api/types";
-import { linkImages, openSavedPrompt, saveImageToCollection } from "../../lib/collection";
-import { useCollection } from "../../state/collection";
+import { linkImages, openSavedPrompt } from "../../lib/collection";
 import { Glyph } from "../icons";
 import { Button, FilterLink } from "../ui";
 
@@ -25,7 +24,6 @@ function Ref({ prompt, extra }: { prompt: PromptRef; extra?: ReactNode }) {
 /** A library image's place in the collection: the prompts it is saved in or shares text with. */
 export default function CollectionSection({ id }: { id: number }) {
   const client = useQueryClient();
-  const openLinking = useCollection((s) => s.openLinking);
   const query = useQuery({
     queryKey: ["collection", "for-image", id],
     queryFn: () => api.imageCollection(id),
@@ -33,16 +31,7 @@ export default function CollectionSection({ id }: { id: number }) {
   const data = query.data;
   return (
     <div className="space-y-1 text-xs">
-      <div className="flex items-center gap-2">
-        <span className="flex-1 font-semibold text-muted">Collection</span>
-        <Button
-          className="inline-flex items-center gap-1"
-          onClick={() => void saveImageToCollection(id)}
-        >
-          <Glyph name="bookmarkPlus" className="size-3.5" /> Save to collection
-        </Button>
-        <Button onClick={() => openLinking([id])}>Add to saved prompt…</Button>
-      </div>
+      <div className="font-semibold text-muted">Collection</div>
       {query.isError && <div className="text-muted">{query.error.message}</div>}
       {data && data.linked.length > 0 && (
         <div>

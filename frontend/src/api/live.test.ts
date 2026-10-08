@@ -45,12 +45,11 @@ const IMAGE_ITEM = [
   "rel_path",
   "width",
   "height",
-  "family",
   "generated_at",
   "status",
-  "has_warnings",
   "timestamp_suspect",
   "saved",
+  "tags",
 ];
 
 describe.skipIf(!base)("live API contract", () => {
@@ -88,9 +87,11 @@ describe.skipIf(!base)("live API contract", () => {
       "started_at",
       "last_error",
       "last_finished_at",
+      "last_fix",
     ]);
     const facets = await api.facets();
     expectKeys(facets, [
+      "tags",
       "families",
       "base_models",
       "samplers",
@@ -115,7 +116,6 @@ describe.skipIf(!base)("live API contract", () => {
       date_to: facets.date_range.max,
       statuses: ["ok"],
       numeric: { cfg: [0, 100], steps: [1, 1000] },
-      has_warnings: null,
     };
     for (const key of ["generated_at", "rel_path", "family", "steps", "cfg"] as const) {
       const ids = await api.ids({ filters, sort: { key, descending: key !== "rel_path" } });
@@ -132,8 +132,7 @@ describe.skipIf(!base)("live API contract", () => {
     // A text search can only narrow the whole library: every id it returns is a known one.
     const known = new Set(ids);
     expect(text.ids.filter((textId) => !known.has(textId))).toEqual([]);
-    const warned = await api.ids({ filters: { ...emptyFilters(), has_warnings: true }, sort });
-    const id = warned.ids[0] ?? ids[0]!;
+    const id = ids[0]!;
 
     const detail = await api.image(id);
     expectKeys(detail, [
@@ -160,6 +159,7 @@ describe.skipIf(!base)("live API contract", () => {
       "timestamp_suspect",
       "status",
       "error",
+      "tags",
     ]);
     if (detail.generation) {
       // An image with generation metadata was built from a graph, so it has nodes.
@@ -201,22 +201,13 @@ describe.skipIf(!base)("live API contract", () => {
     for (const scope of scopes) {
       const stats = await api.stats({
         ...scope,
-        sections: ["numeric", "categorical", "seeds", "loras", "graph", "configs"],
+        sections: ["numeric", "categorical", "seeds", "loras", "configs"],
         lora_key: "name",
       });
       expectKeys(stats, ["scope", "groups"]);
       expectKeys(stats.scope, SCOPE_INFO);
       const g = stats.groups[0]!;
-      expectKeys(g, [
-        "family",
-        "images",
-        "numeric",
-        "categorical",
-        "seeds",
-        "loras",
-        "graph",
-        "configs",
-      ]);
+      expectKeys(g, ["family", "images", "numeric", "categorical", "seeds", "loras", "configs"]);
       expectKeys(g.numeric!.steps, NUMERIC);
       expectKeys(g.categorical!.sampler_name, ["n", "values", "other", "missing"]);
       expectKeys(g.seeds, ["n", "n_unique", "repeated"]);
@@ -231,9 +222,6 @@ describe.skipIf(!base)("live API contract", () => {
           "steps",
         ]);
       }
-      expectKeys(g.graph, ["nodes", "links"]);
-      for (const node of g.graph!.nodes) expectKeys(node, ["name", "images", "median"]);
-      for (const link of g.graph!.links) expectKeys(link, ["source", "target", "images"]);
       expectKeys(g.configs![0], ["key", "count", "share", "fields", "examples", "example_hashes"]);
     }
     expect(
@@ -242,7 +230,7 @@ describe.skipIf(!base)("live API contract", () => {
     ).toBe("selection");
     const byBase = await api.stats({
       ...all,
-      sections: ["loras", "graph"],
+      sections: ["loras"],
       lora_key: "base_name",
     });
     expect(byBase.groups[0]!.numeric).toBeNull();
@@ -345,30 +333,6 @@ describe.skipIf(!base)("live API contract", () => {
       status: 400,
       code: "selection_required",
     });
-  });
-
-  it("node input keys and statistics", async () => {
-    const keys = await api.nodeKeys(all);
-    expectKeys(keys, ["scope", "keys"]);
-    expectKeys(keys.keys[0], ["class_type", "input_name", "kind", "files"]);
-    for (const kind of ["num", "str", "bool"] as const) {
-      const key = keys.keys.find((k) => k.kind === kind);
-      if (!key) continue;
-      const stats = await api.nodeStats({
-        ...all,
-        class_type: key.class_type,
-        input_name: key.input_name,
-      });
-      expectKeys(stats, ["scope", "class_type", "input_name", "groups"]);
-      expectKeys(stats.groups[0], [
-        "family",
-        "files",
-        "kind",
-        "numeric",
-        "categorical",
-        "n_unique",
-      ]);
-    }
   });
 
   it("errors use the error envelope", async () => {

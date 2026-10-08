@@ -14,6 +14,7 @@ from pathlib import Path
 
 from comfylens.collection.archive_rows import ArchiveRowsMixin
 from comfylens.collection.originals import OriginalsMixin
+from comfylens.collection.prompts import PromptsMixin
 from comfylens.collection.queries import QueriesMixin
 from comfylens.collection.store_base import (
     GC_GRACE_SECONDS,
@@ -39,7 +40,7 @@ __all__ = [
 ]
 
 
-class CollectionStore(OriginalsMixin, QueriesMixin, ArchiveRowsMixin):
+class CollectionStore(OriginalsMixin, QueriesMixin, ArchiveRowsMixin, PromptsMixin):
     def __init__(self, directory: Path) -> None:
         self.directory = directory
         self.path = directory / "collection.sqlite"

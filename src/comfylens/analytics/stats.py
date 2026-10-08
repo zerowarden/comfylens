@@ -1,17 +1,18 @@
 """The /api/stats sections per family group."""
 
+from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
 import polars as pl
 
-from comfylens.analytics.categorical import seed_stats, value_counts
-from comfylens.analytics.loras import LoraKey, lora_graph, lora_table, top_values
+from comfylens.analytics.categorical import seed_stats, tag_counts, value_counts
+from comfylens.analytics.loras import LoraKey, lora_table, top_values
 from comfylens.analytics.numeric import HistogramSpec, numeric_stats
 from comfylens.analytics.scope import Resolved
 from comfylens.analytics.snapshot import Snapshot
 from comfylens.config import AnalysisConfig
-from comfylens.extract.keys import decode_config_key
+from comfylens.extract import decode_config_key
 
 NUMERIC_FIELDS = (
     "steps",
@@ -67,28 +68,26 @@ def compute_stats(
     analysis: AnalysisConfig,
 ) -> list[dict[str, Any]]:
     spec = histogram_spec(analysis)
-    out = []
-    for group, rows in resolved.groups():
-        size = rows.height
-        block: dict[str, Any] = {"family": group, "images": size}
-        if "numeric" in sections:
-            block["numeric"] = {
-                name: asdict(numeric_stats(rows[name], analysis.round_decimals, spec))
-                for name in NUMERIC_FIELDS
-            }
-        if "categorical" in sections:
-            block["categorical"] = {
-                name: value_counts(rows[name], analysis.top_n) for name in CATEGORICAL_FIELDS
-            }
-        if "seeds" in sections:
-            block["seeds"] = seed_stats(rows["seed"])
-        if "loras" in sections or "graph" in sections:
-            uses = snap.loras.filter(pl.col("file_id").is_in(rows["id"].implode()))
-        if "loras" in sections:
-            block["loras"] = lora_table(uses, size, lora_key, analysis.round_decimals, spec)
-        if "graph" in sections:
-            block["graph"] = lora_graph(uses, lora_key, analysis.top_n)
-        if "configs" in sections:
-            block["configs"] = top_configs(rows, analysis.top_n)
-        out.append(block)
-    return out
+    digits, top_n = analysis.round_decimals, analysis.top_n
+    # Each requested section, from the family's rows and its LoRA uses.
+    builders: dict[str, Callable[[pl.DataFrame, pl.DataFrame], Any]] = {
+        "numeric": lambda rows, _: {
+            name: asdict(numeric_stats(rows[name], digits, spec)) for name in NUMERIC_FIELDS
+        },
+        "categorical": lambda rows, _: {
+            **{name: value_counts(rows[name], top_n) for name in CATEGORICAL_FIELDS},
+            "tags": tag_counts(rows["tags"], top_n),
+        },
+        "seeds": lambda rows, _: seed_stats(rows["seed"]),
+        "loras": lambda rows, uses: lora_table(uses, rows.height, lora_key, digits, spec),
+        "configs": lambda rows, _: top_configs(rows, top_n),
+    }
+    wanted = {name: build for name, build in builders.items() if name in sections}
+
+    def block(group: str, rows: pl.DataFrame) -> dict[str, Any]:
+        in_family = pl.col("file_id").is_in(rows["id"].implode())
+        uses = snap.loras.filter(in_family) if "loras" in wanted else snap.loras.clear()
+        built = {name: build(rows, uses) for name, build in wanted.items()}
+        return {"family": group, "images": rows.height, **built}
+
+    return [block(group, rows) for group, rows in resolved.groups()]
