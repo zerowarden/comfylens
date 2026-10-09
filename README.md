@@ -45,7 +45,9 @@ rc file, and `make docker-build` builds without starting.
 
 The catalog, thumbnails and saved prompts stay in `~/.local/share/comfylens`,
 `~/.cache/comfylens` and `~/.config/comfylens` on the host, and the container runs as your
-user, so files it writes into the library stay yours.
+user, so files it writes into the library stay yours. The library is mounted at the same
+path inside the container, so the UI names the directory you actually scan, and the host
+CLI and the container share one catalog.
 
 ### What gets created
 

@@ -31,7 +31,9 @@ def _library(given: str | None) -> Path | None:
         if given:
             path = Path(given).expanduser()
         elif rc_path().is_file():
-            return scan_directory()
+            # Resolved so the container mounts (and serves) the same canonical path as the
+            # host CLI; catalog directories are keyed by that path.
+            return scan_directory().resolve()
         else:
             return None
     except RcError as e:

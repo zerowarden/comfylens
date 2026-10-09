@@ -34,5 +34,6 @@ COPY --from=frontend /app/src/comfylens/web ./src/comfylens/web
 RUN uv sync --frozen --no-dev
 EXPOSE 8765
 ENTRYPOINT ["comfylens"]
-# The container serves the directory mounted at /library (see docker-compose.yml).
+# The image default serves a directory mounted at /library; docker-compose mounts the host
+# library at its own path and passes that path as the argument instead.
 CMD ["serve", "/library", "--host", "0.0.0.0", "--watch", "--no-open"]
