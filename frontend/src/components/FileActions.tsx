@@ -15,6 +15,7 @@ import { saveImageToCollection } from "../lib/collection";
 import {
   cachedFile,
   cachedRelPath,
+  copyImageToClipboard,
   exportStripped,
   renameImage,
   tagImages,
@@ -27,7 +28,7 @@ import { useImageDetail } from "../lib/images";
 import { useCollection } from "../state/collection";
 import { useFileActions, type ContextMenu } from "../state/fileActions";
 import Autocomplete from "./Autocomplete";
-import { Glyph } from "./icons";
+import { Glyph, type IconName } from "./icons";
 import { Modal } from "./Modal";
 import { Button, ClearButton, DESTRUCTIVE, DialogActions, FIELD, PRIMARY } from "./ui";
 
@@ -114,41 +115,53 @@ function Menu({ menu }: { menu: ContextMenu }) {
         style={position}
         className="absolute min-w-48 rounded border border-control bg-surface py-1 text-sm shadow-lg"
       >
-        <MenuItem
-          disabled={many}
-          title={many ? "Select a single image to rename it" : undefined}
+        <SingleMenuItem
+          many={many}
+          hint="Select a single image to rename it"
+          icon="pencil"
           onSelect={() => openDialog({ kind: "rename", id: menu.ids[0]! })}
         >
           Rename…
-        </MenuItem>
-        <MenuItem onSelect={() => openDialog({ kind: "tags", ids: menu.ids })}>
+        </SingleMenuItem>
+        <MenuItem icon="tag" onSelect={() => openDialog({ kind: "tags", ids: menu.ids })}>
           {many ? `Tag ${fmtInt(menu.ids.length)} images…` : "Edit tags…"}
         </MenuItem>
-        <MenuItem
-          disabled={many}
-          title={
-            many
-              ? "Select a single image to export it"
-              : "Download a copy with the same pixels and no metadata: no prompt, workflow or EXIF. The original is not changed."
-          }
+        <SingleMenuItem
+          many={many}
+          hint="Select a single image to copy it"
+          icon="copy"
+          onSelect={() => {
+            closeMenu();
+            void copyImageToClipboard(client, menu.ids[0]!);
+          }}
+        >
+          Copy image to clipboard
+        </SingleMenuItem>
+        <SingleMenuItem
+          many={many}
+          hint="Select a single image to export it"
+          title="Download a copy with the same pixels and no metadata: no prompt, workflow or EXIF. The original is not changed."
+          icon="download"
           onSelect={() => {
             closeMenu();
             void exportStripped(client, menu.ids[0]!);
           }}
         >
           Export without metadata
-        </MenuItem>
-        <MenuItem
-          disabled={many}
-          title={many ? "Select a single image to save it as a new prompt" : undefined}
+        </SingleMenuItem>
+        <SingleMenuItem
+          many={many}
+          hint="Select a single image to save it as a new prompt"
+          icon="bookmarkPlus"
           onSelect={() => {
             closeMenu();
             void saveImageToCollection(menu.ids[0]!);
           }}
         >
           Save to collection…
-        </MenuItem>
+        </SingleMenuItem>
         <MenuItem
+          icon="link"
           onSelect={() => {
             closeMenu();
             openLinking(menu.ids);
@@ -158,7 +171,11 @@ function Menu({ menu }: { menu: ContextMenu }) {
             ? `Add ${fmtInt(menu.ids.length)} images to a saved prompt…`
             : "Add to saved prompt…"}
         </MenuItem>
-        <MenuItem danger onSelect={() => openDialog({ kind: "trash", ids: menu.ids })}>
+        <MenuItem
+          icon="trash2"
+          danger
+          onSelect={() => openDialog({ kind: "trash", ids: menu.ids })}
+        >
           {many ? `Move ${fmtInt(menu.ids.length)} images to trash…` : "Move to trash…"}
         </MenuItem>
       </div>
@@ -181,12 +198,14 @@ function MenuItem({
   disabled = false,
   danger = false,
   title,
+  icon,
 }: {
   children: ReactNode;
   onSelect: () => void;
   disabled?: boolean;
   danger?: boolean;
   title?: string;
+  icon?: IconName;
 }) {
   return (
     <button
@@ -195,12 +214,36 @@ function MenuItem({
       disabled={disabled}
       title={title}
       onClick={onSelect}
-      className={`block w-full px-3 py-1 text-left outline-none hover:bg-hover focus:bg-hover disabled:opacity-40 disabled:hover:bg-transparent ${
+      className={`flex w-full items-center gap-2 px-3 py-1 text-left outline-none hover:bg-hover focus:bg-hover disabled:opacity-40 disabled:hover:bg-transparent ${
         danger ? "text-danger" : ""
       }`}
     >
+      {icon && <Glyph name={icon} className="size-3.5" />}
       {children}
     </button>
+  );
+}
+
+/** An item that acts on one image only: disabled with a hint while several are selected. */
+function SingleMenuItem({
+  many,
+  hint,
+  title,
+  icon,
+  onSelect,
+  children,
+}: {
+  many: boolean;
+  hint: string;
+  title?: string;
+  icon?: IconName;
+  onSelect: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <MenuItem disabled={many} title={many ? hint : title} icon={icon} onSelect={onSelect}>
+      {children}
+    </MenuItem>
   );
 }
 

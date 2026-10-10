@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import { CloseButton, CopyButton } from "./ui";
 
@@ -65,8 +65,8 @@ export function ViewerSidebar({ header, children }: { header: ReactNode; childre
   );
 }
 
-/** An image fitted to its box; a click toggles 1:1 size, scrolling when it overflows. */
-export function ZoomableImage({
+/** An image fitted to its box, never cropped. */
+export function FittedImage({
   src,
   className,
   onContextMenu,
@@ -75,24 +75,12 @@ export function ZoomableImage({
   className: string;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-  const [actualSize, setActualSize] = useState(false);
   return (
     <div
-      className={`flex ${className} ${actualSize ? "overflow-auto" : "items-center justify-center overflow-hidden"}`}
-      onClick={() => setActualSize(!actualSize)}
+      className={`flex items-center justify-center overflow-hidden ${className}`}
       onContextMenu={onContextMenu}
-      title={actualSize ? "Click to fit" : "Click for 1:1"}
     >
-      <img
-        key={src}
-        src={src}
-        alt=""
-        className={
-          actualSize
-            ? "max-w-none cursor-zoom-out"
-            : "max-h-full max-w-full cursor-zoom-in object-contain"
-        }
-      />
+      <img key={src} src={src} alt="" className="max-h-full max-w-full object-contain" />
     </div>
   );
 }

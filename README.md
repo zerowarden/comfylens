@@ -49,6 +49,10 @@ user, so files it writes into the library stay yours. The library is mounted at 
 path inside the container, so the UI names the directory you actually scan, and the host
 CLI and the container share one catalog.
 
+Neither container has internet access: the app starts with its default route removed and
+runs without capabilities, and the mDNS sidecar only talks to the host's Avahi daemon over
+the mounted DBus socket.
+
 ### What gets created
 
 | Path | Contents |

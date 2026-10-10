@@ -22,6 +22,12 @@ ENTRYPOINT ["avahi-publish", "--address", "--no-reverse", "comfylens.local", "12
 
 # The application: Python, the frontend build and the dependencies from uv.lock.
 FROM python:3.14-slim AS runtime
+# iproute2 gives the compose entrypoint `ip` to remove the container's default route, so
+# the app cannot reach the internet; setpriv (util-linux) then drops root to your user
+# before comfylens starts. See docker-compose.yml.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends iproute2 \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /uvx /usr/local/bin/
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

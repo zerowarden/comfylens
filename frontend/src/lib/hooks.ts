@@ -76,6 +76,79 @@ function copyWithField(text: string): boolean {
 }
 
 /**
+ * Put an image on the clipboard. The Clipboard API needs a secure context and takes PNG only,
+ * so plain-HTTP origins (the container's http://comfylens.local) and other formats fall back
+ * to a selected image and `execCommand`.
+ */
+export async function copyImage(src: string): Promise<void> {
+  const response = await fetch(src);
+  if (!response.ok) throw new Error(`the image could not be read (${response.status})`);
+  const blob = await response.blob();
+  const png = blob.type === "image/png" ? blob : await toPng(blob);
+  if (navigator.clipboard && typeof ClipboardItem !== "undefined") {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+      return;
+    } catch {
+      // Denied, unfocused or blocked by policy: the legacy path may still work.
+    }
+  }
+  if (!(await copyImageWithElement(png))) throw new Error("the browser blocked the clipboard");
+}
+
+/** Re-encode an image the server can send (jpeg, webp) as the PNG the clipboard takes. */
+async function toPng(blob: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("the image could not be drawn");
+    context.drawImage(bitmap, 0, 0);
+    return await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (png) =>
+          png ? resolve(png) : reject(new Error("the image could not be converted to PNG")),
+        "image/png",
+      ),
+    );
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** The pre-Clipboard-API path for images: an off-screen image, selected, with one `execCommand`
+ * call. */
+async function copyImageWithElement(blob: Blob): Promise<boolean> {
+  const url = URL.createObjectURL(blob);
+  const host = document.createElement("div");
+  host.contentEditable = "true";
+  // Off screen but still selectable; `display: none` cannot be selected.
+  host.style.position = "fixed";
+  host.style.left = "-9999px";
+  const image = document.createElement("img");
+  image.src = url;
+  host.append(image);
+  document.body.append(host);
+  try {
+    await image.decode();
+    const range = document.createRange();
+    range.selectNode(image);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    window.getSelection()?.removeAllRanges();
+    host.remove();
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
  * Keys pressed inside a menu or dialog stop here: the grid, detail and Compare views listen on the
  * window, and must not clear the selection or close themselves on its Escape or Enter.
  */

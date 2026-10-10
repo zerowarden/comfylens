@@ -16,12 +16,12 @@ import CollectionSection from "../Collection/CollectionSection";
 import { ChainText, Glyph } from "../icons";
 import { Button, Heading, LINK_BUTTON, td } from "../ui";
 import {
+  FittedImage,
   GraphCopyButtons,
   PromptBox,
   ViewerHeader,
   ViewerModal,
   ViewerSidebar,
-  ZoomableImage,
 } from "../Viewer";
 import LoraChain from "./LoraChain";
 import NodeTable from "./NodeTable";
@@ -182,7 +182,7 @@ function Details({ id }: { id: number }) {
 function ImagePane({ id }: { id: number }) {
   const openMenu = useFileActions((s) => s.openMenu);
   return (
-    <ZoomableImage
+    <FittedImage
       src={fileUrl(id)}
       className="min-w-0 flex-1 bg-stage"
       onContextMenu={(e) => {

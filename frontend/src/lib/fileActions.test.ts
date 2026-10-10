@@ -14,9 +14,22 @@ import { useFilters } from "../state/filters";
 import { useSelection } from "../state/selection";
 import { useUi } from "../state/ui";
 import { imageItem } from "../test/fixtures";
-import { exportStripped, renameImage, tagImages, trashImages } from "./fileActions";
+import {
+  copyImageToClipboard,
+  exportStripped,
+  renameImage,
+  tagImages,
+  trashImages,
+} from "./fileActions";
 import { TRASH_BATCH } from "./files";
+import { copyImage } from "./hooks";
 import { orderKey } from "./images";
+
+// The clipboard itself is covered in hooks.test.ts; here only the action around it.
+vi.mock("./hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./hooks")>();
+  return { ...actual, copyImage: vi.fn() };
+});
 
 const item = (id: number) => imageItem(id, `dir/${id}.png`);
 
@@ -84,6 +97,27 @@ describe("exportStripped", () => {
     await exportStripped(client, 4);
     expect(useFileActions.getState().notice).toEqual({
       text: "Could not export 4.png: the PNG ends inside a chunk",
+      tone: "error",
+    });
+  });
+});
+
+describe("copyImageToClipboard", () => {
+  it("reports a copy with the cached name", async () => {
+    vi.mocked(copyImage).mockResolvedValue(undefined);
+    await copyImageToClipboard(client, 4);
+    expect(copyImage).toHaveBeenCalledWith("/api/images/4/file");
+    expect(useFileActions.getState().notice).toEqual({
+      text: "Copied 4.png to the clipboard",
+      tone: "info",
+    });
+  });
+
+  it("reports a failure with the cached name", async () => {
+    vi.mocked(copyImage).mockRejectedValue(new Error("the browser blocked the clipboard"));
+    await copyImageToClipboard(client, 4);
+    expect(useFileActions.getState().notice).toEqual({
+      text: "Could not copy 4.png: the browser blocked the clipboard",
       tone: "error",
     });
   });

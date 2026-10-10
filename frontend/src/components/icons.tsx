@@ -10,9 +10,11 @@ import download from "@iconify-icons/lucide/download";
 import imagePlus from "@iconify-icons/lucide/image-plus";
 import link from "@iconify-icons/lucide/link";
 import moon from "@iconify-icons/lucide/moon";
+import pencil from "@iconify-icons/lucide/pencil";
 import search from "@iconify-icons/lucide/search";
 import sun from "@iconify-icons/lucide/sun";
 import tag from "@iconify-icons/lucide/tag";
+import trash2 from "@iconify-icons/lucide/trash-2";
 import x from "@iconify-icons/lucide/x";
 import zoomIn from "@iconify-icons/lucide/zoom-in";
 // The offline build renders bundled icon data and never fetches from the Iconify API.
@@ -34,14 +36,16 @@ const ICONS = {
   imagePlus,
   link,
   moon,
+  pencil,
   search,
   sun,
   tag,
+  trash2,
   x,
   zoomIn,
 } satisfies Record<string, IconifyIcon>;
 
-type IconName = keyof typeof ICONS;
+export type IconName = keyof typeof ICONS;
 
 export function Glyph({
   name,

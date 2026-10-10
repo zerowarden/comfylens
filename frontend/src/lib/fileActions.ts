@@ -1,6 +1,6 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
-import { api } from "../api/client";
+import { api, fileUrl } from "../api/client";
 import type { FileFailure, IdsResponse, ImageDetail, ImagesPage } from "../api/types";
 import { useFileActions, type Notice } from "../state/fileActions";
 import { useFilters } from "../state/filters";
@@ -17,6 +17,7 @@ import {
   withBaseName,
 } from "./files";
 import { errorText, fmtInt } from "./format";
+import { copyImage } from "./hooks";
 import { orderKey, PAGE_SIZE } from "./images";
 
 // Every edit changes the caches first and sends the request after: the grid never waits for the
@@ -101,6 +102,19 @@ export async function exportStripped(client: QueryClient, id: number): Promise<v
     notify({ text: `Exported ${link.download} without metadata`, tone: "info" });
   } catch (e) {
     notify({ text: `Could not export ${label}: ${errorText(e)}`, tone: "error" });
+  }
+}
+
+/** Copy an image to the clipboard through the browser; the server only serves the bytes. */
+export async function copyImageToClipboard(client: QueryClient, id: number): Promise<void> {
+  const { notify } = useFileActions.getState();
+  const relPath = cachedRelPath(client, id);
+  const label = relPath ? baseName(relPath) : "the image";
+  try {
+    await copyImage(fileUrl(id));
+    notify({ text: `Copied ${label} to the clipboard`, tone: "info" });
+  } catch (e) {
+    notify({ text: `Could not copy ${label}: ${errorText(e)}`, tone: "error" });
   }
 }
 

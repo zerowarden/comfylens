@@ -13,12 +13,12 @@ import { Glyph } from "../icons";
 import { Button, DESTRUCTIVE, DialogActions, Heading, LINK_BUTTON, ThumbButton, td } from "../ui";
 import { Modal } from "../Modal";
 import {
+  FittedImage,
   GraphCopyButtons,
   PromptBox,
   ViewerHeader,
   ViewerModal,
   ViewerSidebar,
-  ZoomableImage,
 } from "../Viewer";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -42,7 +42,7 @@ function ImagePane({ prompt }: { prompt: SavedPrompt }) {
   }
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-stage">
-      <ZoomableImage src={originalUrl(shown.content_hash)} className="min-h-0 flex-1" />
+      <FittedImage src={originalUrl(shown.content_hash)} className="min-h-0 flex-1" />
       {prompt.references.length > 1 && (
         <div className="flex shrink-0 gap-1 overflow-x-auto p-2">
           {prompt.references.map((r, i) => (
